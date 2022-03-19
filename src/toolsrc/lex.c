@@ -102,12 +102,15 @@ t_token scan(void)
      */
     while (*scanpos && (*scanpos == ' ' || *scanpos == '\t')) scanpos++;
     tokenstr = scanpos;
+    
+    
     /*
      * Scan for token based on first character.
      */
     if (scantoken == EOF_TOKEN)
         ;
-    else if (*scanpos == '\0' || *scanpos == '\n' || *scanpos == ';')
+       
+    else if (*scanpos == '\0' || *scanpos == '\n' || *scanpos == ';')  
         scantoken = EOL_TOKEN;
     else if ((scanpos[0] >= 'a' && scanpos[0] <= 'z')
           || (scanpos[0] >= 'A' && scanpos[0] <= 'Z')
@@ -497,7 +500,12 @@ int next_line(void)
         }
         len = strlen(inputline);
         if (len > 0 && inputline[len-1] == '\n')
-            inputline[len-1] = '\0';
+            {
+            	inputline[len-1] = '\0';
+		        if(len>1 && inputline[len-2] == '\r')
+        			inputline[len-2] = '\0';
+        	}    
+            
         lineno++;
         scantoken = EOL_TOKEN;
         printf("; %s: %04d: %s\n", filename, lineno, inputline);
