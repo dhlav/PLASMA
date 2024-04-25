@@ -22,6 +22,7 @@ OPPAGE  =   OPIDX+1
 ;* INTERPRETER HEADER+INITIALIZATION
 ;*
         *=      $0280
+;*        *=      $2000
 SEGBEGIN JMP    VMINIT
 ;*
 ;* SYSTEM INTERPRETER ENTRYPOINT
@@ -33,7 +34,7 @@ INTERP  PLA
         PLA
         ADC     #$00
         STA     IPH
-        LDY     #$01
+        LDY     #$00
         JMP     FETCHOP
 ;*
 ;* ENTER INTO USER BYTECODE INTERPRETER
@@ -121,7 +122,7 @@ OPTBL   !WORD   ZERO,CN,CN,CN,CN,CN,CN,CN                               ; 00 02 
         !WORD   NEG,COMP,BAND,IOR,XOR,SHL,SHR,IDXW                      ; 90 92 94 96 98 9A 9C 9E
         !WORD   BRGT,BRLT,INCBRLE,ADDBRLE,DECBRGE,SUBBRGE,BRAND,BROR    ; A0 A2 A4 A6 A8 AA AC AE
         !WORD   ADDLB,ADDLW,ADDAB,ADDAW,IDXLB,IDXLW,IDXAB,IDXAW         ; B0 B2 B4 B6 B8 BA BC BE
-        !WORD   NATV                                                    ; C0
+        !WORD   NATV,JUMPZ,JUMP                                         ; C0 C2 C4
 ;*
 ;* DIV TOS-1 BY TOS
 ;*
@@ -774,7 +775,7 @@ ISGE    LDA     ESTKL+1,X
         BPL     ISTRU
         BMI     ISFLS
 +
- -      BPL     ISFLS
+-       BPL     ISFLS
         BMI     ISTRU
 ISLE    LDA     ESTKL,X
         CMP     ESTKL+1,X
@@ -1073,9 +1074,33 @@ NATV    TYA                     ; FLATTEN IP
         JMP     (IP)
 +       INC     IPH
         JMP     (IP)
+;*
+;* JUMPS FOR FORTH COMPILER
+;*
+JUMPZ   INX
+        LDA     ESTKH-1,X
+        ORA     ESTKL-1,X
+        BEQ     JUMP
+        INY                     ;+INC_IP
+        INY
+        BMI     +
+        JMP     NEXTOP
++       JMP     FIXNEXT
+JUMP    INY
+        LDA     (IP),Y
+        PHA
+        INY
+        LDA     (IP),Y
+        STA     IPH
+        PLA
+        STA     IPL
+        LDY     #$00
+        JMP     FETCHOP
 A1CMD   !SOURCE "vmsrc/apple/a1cmd.a"
 SEGEND  =       *
-VMINIT  LDY     #$10        ; INSTALL PAGE 0 FETCHOP ROUTINE
+VMINIT  LDX     #$FE        ; INIT STACK LEAVING ROOM FOR INBUFF SIZE
+        TXS
+        LDY     #$10        ; INSTALL PAGE 0 FETCHOP ROUTINE
 -       LDA     PAGE0-1,Y
         STA     DROP-1,Y
         DEY

@@ -155,16 +155,16 @@ OPTBL   !WORD   ZERO,CN,CN,CN,CN,CN,CN,CN                               ; 00 02 
         !WORD   NEG,COMP,BAND,IOR,XOR,SHL,SHR,IDXW                      ; 90 92 94 96 98 9A 9C 9E
         !WORD   BRGT,BRLT,INCBRLE,ADDBRLE,DECBRGE,SUBBRGE,BRAND,BROR    ; A0 A2 A4 A6 A8 AA AC AE
         !WORD   ADDLB,ADDLW,ADDAB,ADDAW,IDXLB,IDXLW,IDXAB,IDXAW         ; B0 B2 B4 B6 B8 BA BC BE
-        !WORD   NATV                                                    ; C0
+        !WORD   NATV,JUMPZ,JUMP                                         ; C0 C2 C4
 ;*
 ;* SYSTEM INTERPRETER ENTRYPOINT
 ;*
 INTERP  PLA
         CLC
-        ADC 	#$01
+        ADC     #$01
         STA     IPL
         PLA
-        ADC	    #$00
+        ADC         #$00
         STA     IPH
         LDY     #$00
         STY     IPX
@@ -287,29 +287,49 @@ _DIVEX  INX
 ;* MUL TOS-1 BY TOS
 ;*
 MUL     STY     IPY
-        LDY     #$10
+        LDA     ESTKH,X
+        CMP     ESTKH+1,X
+        BCS     +
+        TAY                     ; SWAP MULTIPLIER AND MULTIPLICAND
+        LDA     ESTKH+1,X       ; SO THAT MULTIPLIER IS SMALLER
+        STA     ESTKH,X
+        STY     ESTKH+1,X
+        LDY     ESTKL,X
         LDA     ESTKL+1,X
+        STA     ESTKL,X
+        STY     ESTKL+1,X
++       LDA     ESTKL+1,X
         EOR     #$FF
         STA     TMPL
-        LDA     ESTKH+1,X
-        EOR     #$FF
-        STA     TMPH
         LDA     #$00
         STA     ESTKL+1,X       ; PRODL
-;       STA     ESTKH+1,X       ; PRODH
-_MULLP  LSR     TMPH            ; MULTPLRH
-        ROR     TMPL            ; MULTPLRL
+;       STA     TMPH            ; PRODH
+        LDY     #$08
+_MULLPL LSR     TMPL            ; ~MULTPLRL
         BCS     +
-        STA     ESTKH+1,X       ; PRODH
-        LDA     ESTKL,X         ; MULTPLNDL
-        ADC     ESTKL+1,X       ; PRODL
-        STA     ESTKL+1,X
-        LDA     ESTKH,X         ; MULTPLNDH
-        ADC     ESTKH+1,X       ; PRODH
+        STA     TMPH            ; PRODH
+        LDA     ESTKL+1,X       ; PRODL
+        ADC     ESTKL,X         ; +MULTPLNDL
+        STA     ESTKL+1,X       ; =PRODL
+        LDA     TMPH            ; PRODH
+        ADC     ESTKH,X         ; +MULTPLNDH
 +       ASL     ESTKL,X         ; MULTPLNDL
         ROL     ESTKH,X         ; MULTPLNDH
         DEY
-        BNE     _MULLP
+        BNE     _MULLPL
+        BEQ     +
+_MULLPH CLC
+        TAY                     ; PRODH
+        LDA     ESTKL+1,X       ; PRODL
+        ADC     ESTKL,X         ; +MULTPLNDL
+        STA     ESTKL+1,X       ; =PRODL
+        TYA                     ; PRODH
+        ADC     ESTKH,X         ; +MULTPLNDH
+-       ASL     ESTKL,X         ; MULTPLNDL
+        ROL     ESTKH,X         ; MULTPLNDH
++       LSR     ESTKH+1,X       ; MULTPLRH
+        BCS     _MULLPH
+        BNE     -               ; ONLY MULT AS MANY BITS AS WE NEED
         STA     ESTKH+1,X       ; PRODH
         LDY     IPY
         JMP     DROP
@@ -1428,6 +1448,28 @@ NATV    TYA                     ; FLATTEN IP
         JMP     (IP)
 +       INC     IPH
         JMP     (IP)
+;*
+;* JUMPS FOR FORTH COMPILER
+;*
+JUMPZ   INX
+        LDA     ESTKH-1,X
+        ORA     ESTKL-1,X
+        BEQ     JUMP
+        INY                     ;+INC_IP
+        INY
+        BMI     +
+        JMP     NEXTOP
++       JMP     FIXNEXT
+JUMP    INY
+        LDA     (IP),Y
+        PHA
+        INY
+        LDA     (IP),Y
+        STA     IPH
+        PLA
+        STA     IPL
+        LDY     #$00
+        JMP     FETCHOP
 SOSCMD  =       *
         !SOURCE "vmsrc/apple/sossysjit.a"
 

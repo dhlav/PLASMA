@@ -1,34 +1,40 @@
-# PLASMA Version 2.0 Alpha 1
+# PLASMA Version 2.1
 
 Welcome to PLASMA: the Grand Unifying Platform for the Apple 1, ][, and ///.
 
 Download the five disk images:
 
-[PLASMA 2.0 Alpha1 800K Full System](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA2.2mg?raw=true)
+[PLASMA 2.1 800K Full System](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA-2.1.2mg?raw=true)
 
-[PLASMA 2.0 Alpha1 System and ProDOS Boot](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA2-SYS.PO?raw=true)
+[PLASMA 2.1 ProDOS Boot & Install](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA-2.1-INST.po?raw=true)
 
-[PLASMA 2.0 Alpha1 Build Tools](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA2-BLD.PO?raw=true)
+[PLASMA 2.1 System Libraries](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA-2.1-SYS.po?raw=true)
 
-[PLASMA 2.0 Alpha1 Demos](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA2-DEM.PO?raw=true)
+[PLASMA 2.1 Build Tools](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA-2.1-BLD.po?raw=true)
 
-[PLASMA 2.0 Alpha1 TCP/IP network modules](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA2-INET.PO?raw=true)
+[PLASMA 2.1 Demos](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA-2.1-DEMOS.po?raw=true)
 
-[PLASMA 2.0 Alpha1 Apple /// SOS Mame Boot and SANE floating point modules](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA2-FPSOS.PO?raw=true)
+[PLASMA 2.1 TCP/IP network modules](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA-2.1-INET.po?raw=true)
 
-[PLASMA 2.0 Alpha1 Apple /// Mame hard disk image](https://github.com/dschmenk/PLASMA/blob/master/images/apple/apple3.hd?raw=true)
+[PLASMA 2.1 Apple /// SOS Mame Boot and SANE floating point modules](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA-2.1-FPSOS.po?raw=true)
 
-PLASMA can be run from floppies, System in Drive 1, and Build or Demos in Drive 2. Mass storage is the recommended installation that looks like (replacing HARDISK with your volume name of choice):
+[PLASMA 2.1 Apple /// SOS Mame Boot](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLASMA2-A3MAME.PO?raw=true)
 
-System Files => /HARDISK/PLASMA/
+[PLASMA 2.1 Apple /// Mame hard disk image](https://github.com/dschmenk/PLASMA/blob/master/images/apple/apple3.hd?raw=true)
+
+[PLASMA 2.1 PLFORTH stand-alone boot](https://github.com/dschmenk/PLASMA/blob/master/images/apple/PLFORTH.PO?raw=true)
+
+PLASMA now has a ProDOS hard disk install script. Mass storage is the recommended installation that looks like (replacing HARDISK with your volume name of choice) if you want to copy files yourself:
+
+Boot & System Files => /HARDISK/PLASMA/
 
 Build Files => /HARDISK/PLASMA/BLD/
 
 Demo Files => /HARDISK/PLASMA/DEMOS/
 
-SANE files => /HARDISK/PLASMA/SYS
+Floating Point SANE Files => /HARDISK/PLASMA/SYS
 
-INET files => /HARDDISK/PLASMA/SYS
+INET Files => /HARDDISK/PLASMA/SYS
 
 Use the System Utilities to copy the floppy images into the above mentioned directories.
 
@@ -46,7 +52,7 @@ PLASMA can utilize the 16 bit features of the 65802 and 65816 processors to impr
 
 ## Apple ///
 
-The Apple /// gets the environment it always wanted: The ability to navigate the filesystem with a command line interface. The Apple /// always boots from the floppy drive, even if a hard disk is installed. The PLASMA.SOS floppy should be updated with the SOS.DRIVER configured for your machine. It contains the SOS.DRIVER configured for the Apple 3 Ready-To-Run Mame environment. Once booted, type `S /HARDISK/PLASMA` (or your install directory of choice) to change to, and set, the system directory. This can be automated by creating an `AUTORUN` file on the boot floppy with the above command in it.
+The Apple /// gets the environment it always wanted: The ability to navigate the filesystem with a command line interface. The Apple /// always boots from the floppy drive, even if a hard disk is installed. `PLASMA2-A3MAME.PO` is an Apple 3 bootable disk containing the SOS.DRIVER configured for the [Apple 3 Ready-To-Run Mame environment](https://github.com/datajerk/apple3rtr). `apple3.hd` is the pre-installed PLASMA hard disk image set up for [Apple 3 Ready-to-Run](https://github.com/datajerk/apple3rtr). For a physical Apple 3, the PLASMA2-FPSOS.PO floppy should be updated with the SOS.DRIVER configured for the machine. Once booted, type `S /HARDISK/PLASMA` (or your install directory of choice) to change to, and set, the system directory. This can be automated by creating an `AUTORUN` file on the boot floppy with the above command in it.
 
 ## PLASMA Command Line Shell
 
@@ -75,7 +81,7 @@ The shell is very brief with error messages. It is meant solely as a way to run 
 
 PLASMA comes with many library modules used by the tools, demos and sample code. The PLASMA system volume must remain in place for the duration of PLASMAs run otherwise it won't be able to find CMD or the system libraries. Probably the most useful included module is the editor. It is used for editing PLASMA source file, assembly source files, or any text file. Execute it with:
 ```
-+ED [TEXT FILE]
++ED [TEXT FILE] [GOTO LINE NUMBER]
 ```
 The file manipulation utilities to copy, delete, rename, create directories, and change file type and aux type remove the need for external programs to do the same. PLASMA can now be installed with the tools included on the PLASMA2-SYS boot floppy. They are:
 ```
@@ -86,7 +92,7 @@ The file manipulation utilities to copy, delete, rename, create directories, and
 +TYPE <FILENAME> [NEWTYPE [NEWAUX]]
 +CAT [-R] <FILEPATH]
 ```
-The ```-R``` option will operate on the directories recursively. Wildcard filenames can be specified with ```'*'``` matching zero or more characters, and ```'?'``` matching any character.
+The ```-R``` option will operate on the directories recursively. Wildcard filenames can be specified with ```'*'``` matching zero or more characters, and ```'?'``` matching any character. When copying files to the current directory, ```=``` can be used as a shortcut.
 
 ## Compiler Modules
 
@@ -117,6 +123,34 @@ There is a [YouTube playlist](https://www.youtube.com/playlist?list=PLlPKgUMQbJ7
 - The Apple /// may not always report errors properly or at all.
 
 - The documentation is sparse and incomplete. Yep, could use your help...
+
+# Changes in PLASMA for 2.0 Release
+
+1. Fix command line buffer overflow
+
+2. Use VBlank to blink editor cursor so not CPU speed dependent
+
+3. Add ```=``` for ```+COPY``` current destination
+
+4. Add //c support for DGRLIB and GRLIB wait-for-VBlank routines 
+
+# Changes in PLASMA for 2.0 Beta
+
+1. Compilers allows for including self imported defines
+
+2. Compilers fixed for local constants
+
+3. Floating point string formatting fixes and improvements
+
+4. Fiber library exports number of active fibers
+
+# Changes in PLASMA for 2.0 Alpha 2
+
+1. Self hosted compiler fixes for invalid array size constants
+
+2. Ensure IDs in self hosted compiler are 31 characters significant
+
+3. Fix bug COPY file parsing and move common routine into MATCHFILES
 
 # Changes in PLASMA for 2.0 Alpha 1
 

@@ -1,0 +1,5 @@
+#!/bin/bash
+
+./mkrel
+open /Applications/Virtual\ \]\[/Virtual\ \]\[.app/
+

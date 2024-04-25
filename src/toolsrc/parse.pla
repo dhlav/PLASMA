@@ -138,10 +138,13 @@ def parse_constval
         is ID_TKN
             size  = 2
             idptr = lookup_id(tknptr, tknlen)
-            type  = idptr=>idtype
+            if not idptr; exit_err(ERR_INVAL|ERR_CONST); fin
+            type = idptr=>idtype
             if type & (FUNC_TYPE|ADDR_TYPE)
                 if mod <> 8; exit_err(ERR_INVAL|ERR_CONST); fin
                 type = CONSTADDR_TYPE
+            elsif type <> CONST_TYPE
+                exit_err(ERR_INVAL|ERR_CONST)
             fin
             value = idptr=>idval
             break
@@ -611,7 +614,7 @@ def parse_stmnt
     byte type, elem_type, elem_size, cfnvals
     word seq, fromseq, toseq, tag_prevbrk, tag_prevcnt, tag_else, tag_endif, tag_while, tag_wend
     word tag_repeat, tag_for, tag_choice, tag_of, idptr, addr, stepdir
-    word caseconst, casecnt, caseval, casetag, i
+    word case_const, case_type, casecnt, caseval, casetyp, casetag, i
 
     if token <> END_TKN and token <> DONE_TKN and token <> OF_TKN and token <> DEFAULT_TKN
         prevstmnt = token
@@ -799,8 +802,9 @@ def parse_stmnt
             tag_prevbrk = break_tag
             break_tag   = new_tag(RELATIVE_FIXUP)
             tag_choice  = new_tag(RELATIVE_FIXUP)
-            caseval     = heapalloc(CASENUM)
-            casetag     = heapalloc(CASENUM)
+            caseval     = heapalloc(CASENUM*2)
+            casetyp     = heapalloc(CASENUM*2)
+            casetag     = heapalloc(CASENUM*2)
             casecnt     = 0
             seq, cfnvals = parse_expr(NULL)
             if !seq; exit_err(ERR_INVAL|ERR_STATE); fin
@@ -815,19 +819,21 @@ def parse_stmnt
                 when token
                     is OF_TKN
                         if casecnt == CASENUM; exit_err(ERR_OVER|ERR_TABLE); fin
-                        caseconst, drop, drop = parse_constexpr
-                        tag_of                = new_tag(RELATIVE_FIXUP)
-                        i                     = casecnt
-                        while i > 0 and caseval=>[i-1] > caseconst
+                        case_const, drop, case_type = parse_constexpr
+                        tag_of                      = new_tag(RELATIVE_FIXUP)
+                        i                           = casecnt
+                        while i > 0 and caseval=>[i-1] > case_const
                             //
                             // Move larger case consts up
                             //
                             caseval=>[i] = caseval=>[i-1]
+                            casetyp=>[i] = casetyp=>[i-1]
                             casetag=>[i] = casetag=>[i-1]
                             i--
                         loop
-                        if i < casecnt and caseval=>[i] == caseconst; exit_err(ERR_DUP|ERR_STATE); fin
-                        caseval=>[i] = caseconst
+                        if i < casecnt and caseval=>[i] == case_const; exit_err(ERR_DUP|ERR_STATE); fin
+                        caseval=>[i] = case_const
+                        casetyp=>[i] = case_type
                         casetag=>[i] = tag_of
                         casecnt++
                         emit_tag(tag_of)
@@ -842,7 +848,7 @@ def parse_stmnt
                             emit_branch(tag_of)
                         fin
                         emit_tag(tag_choice)
-                        emit_caseblock(casecnt, caseval, casetag)
+                        emit_caseblock(casecnt, caseval, casetyp, casetag)
                         tag_choice = 0
                         if tag_of
                             emit_tag(tag_of)
@@ -863,7 +869,7 @@ def parse_stmnt
             if tag_choice
                 emit_branch(break_tag)
                 emit_tag(tag_choice)
-                emit_caseblock(casecnt, caseval, casetag)
+                emit_caseblock(casecnt, caseval, casetyp, casetag)
             fin
             heaprelease(caseval)
             emit_tag(break_tag)
@@ -964,7 +970,7 @@ def parse_stmnt
     wend
     return scan == EOL_TKN
 end
-def parse_var(type, basesize)#0
+def parse_var(type, basesize, ignore_var)#0
     byte consttype, constsize, idlen
     word idptr, constval, arraysize, size
 
@@ -992,7 +998,7 @@ def parse_var(type, basesize)#0
             arraysize = arraysize + emit_data(type, consttype, constval, constsize)
         loop
         size_iddata(PTR_TYPE, size, arraysize)
-    else
+    elsif not ignore_var
         if idlen
             if infunc
                 new_idlocal(idptr, idlen, type, size)
@@ -1063,9 +1069,9 @@ def parse_struc#0
     if token <> END_TKN; exit_err(ERR_MISS|ERR_CLOSE|ERR_STATE); fin
     scan
 end
-def parse_vars(type)
-    byte idlen, size, cfnparms, cfnvals
-    word value, idptr
+def parse_vars(type, ignore_vars)
+    byte idlen, cfnparms, cfnvals
+    word size, value, idptr
 
     when token
         is SYSFLAGS_TKN
@@ -1073,6 +1079,7 @@ def parse_vars(type)
             modsysflags, drop, drop = parse_constexpr
             break
         is CONST_TKN
+            if type & LOCAL_TYPE; exit_err(ERR_INVAL|ERR_GLOBAL|ERR_INIT); fin
             if scan <> ID_TKN; exit_err(ERR_INVAL|ERR_CONST); fin
             idptr = tknptr
             idlen = tknlen
@@ -1104,7 +1111,7 @@ def parse_vars(type)
                 rewind(tknptr)
             fin
             if type & WORD_TYPE; size = size * 2; fin
-            repeat; parse_var(type, size); until token <> COMMA_TKN
+            repeat; parse_var(type, size, ignore_vars); until token <> COMMA_TKN
             break
         is PREDEF_TKN
             repeat
@@ -1146,11 +1153,23 @@ def parse_vars(type)
     return TRUE
 end
 def parse_mods
+    byte i, ignore_emit
+
     if token == IMPORT_TKN
         if scan <> ID_TKN; exit_err(ERR_MISS|ERR_ID); fin
-        new_moddep(tknptr, tknlen)
+        if tknlen == modfile
+            ignore_emit = TRUE
+            for i = 1 to tknlen
+                if toupper(tknptr->[i - 1]) <> modfile[i]; ignore_emit = FALSE; break; fin
+            next
+        else
+            ignore_emit = FALSE
+        fin
+        if not ignore_emit
+            new_moddep(tknptr, tknlen)
+        fin
         scan
-        while parse_vars(EXTERN_TYPE); nextln; loop
+        while parse_vars(EXTERN_TYPE, ignore_emit); nextln; loop
         if token <> END_TKN; exit_err(ERR_MISS|ERR_CLOSE|ERR_STATE); fin
         scan
     fin
@@ -1225,7 +1244,7 @@ def parse_defs
     when token
         is CONST_TKN
         is STRUC_TKN
-            return parse_vars(GLOBAL_TYPE)
+            return parse_vars(GLOBAL_TYPE, FALSE)
         is EXPORT_TKN
             if scan <> DEF_TKN; exit_err(ERR_INVAL|ERR_STATE); fin
             type = type | EXPORT_TYPE
@@ -1270,7 +1289,7 @@ def parse_defs
             defcodeptr = codeptr
             emit_tag(func_tag)
             new_dfd(func_tag)
-            while parse_vars(LOCAL_TYPE); nextln; loop
+            while parse_vars(LOCAL_TYPE, FALSE); nextln; loop
             emit_enter(cfnparms)
             prevstmnt = 0
             while parse_stmnt; nextln; loop
@@ -1296,18 +1315,19 @@ end
 def parse_module#0
     init_idglobal
     init_idlocal
-    puts("Data+Code buffer size = "); puti(codebufsz); putln
+    puts("Data+Code buffer size = "); puti(codebufsz); putln; putln
+    puts(@modfile); putln
     if nextln
         //
         // Compile module
         //
-        puts("\nDATA:");
+        puts("DATA:");
         while parse_mods;              nextln; loop
-        while parse_vars(GLOBAL_TYPE); nextln; loop
+        while parse_vars(GLOBAL_TYPE, FALSE); nextln; loop
         emit_codeseg
         puti(codeptr - codebuff); puts(@bytesln)
         while parse_defs;              nextln; loop
-        puts("INIT:")
+        puts("INIT:");
         entrypoint = codeptr
         prevstmnt  = 0
         init_idlocal

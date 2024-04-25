@@ -173,6 +173,7 @@ def shell#1
     byte prefix[64]
     byte err[]
     word cmdptr
+
     //
     // Copy AUTORUN commmand line
     //
@@ -180,6 +181,7 @@ def shell#1
     //
     // Handle commands.
     //
+    getpfx(@prefix)
     repeat
         if ^cmdptr
             when toupper(parsecmd(cmdptr))
@@ -187,7 +189,7 @@ def shell#1
                     catalog(cmdptr)
                     break
                 is 'P'
-                    if ^cmdptr and ^(cmdptr + 1) <> '/'
+                    if ^cmdptr and ^(cmdptr + 1) <> '/' and ^(cmdptr + 1) <> '.'
                         strcat(@prefix, cmdptr)
                     else
                         strcpy(@prefix, cmdptr)
@@ -204,15 +206,13 @@ def shell#1
                     break
                 is 'S'
                     setpfx(cmdptr)
-                    strcat(getpfx(cmdsys:syspath), "SYS/"))
+                    strcat(getpfx(cmdsys:syspath), "SYS/")
                     break
                 is 'V'
                     volumes
                     break
                 is '+'
-					//cmdsys:modexec(striptrail(cmdptr))
                     return striptrail(cmdptr)
-                    //cmdsys:syswrite(cmdsys.refcons, @textmode, 3)
                     break
                 otherwise
                     puts("?\n")

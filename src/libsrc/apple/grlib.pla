@@ -45,10 +45,10 @@ end
 //
 export asm grPlot(x, y)#0
         ; GET ROW BUFFER ADDRESSES
-		LDA     $3000
+                LDA     $3000
         STA     SRCL
         LDA     $3001
-		STA		SRCH
+                STA             SRCH
         LDA     ESTKL,X     ; Y COORD
         AND     #$FE
         TAY
@@ -78,10 +78,10 @@ end
 //
 export asm grHLin(x1, x2, y)#0
         ; GET ROW BUFFER ADDRESSES
-		LDA     $3000
+                LDA     $3000
         STA     SRCL
         LDA     $3001
-		STA		SRCH
+                STA             SRCH
         LDA     ESTKL+1,X    ; X2 COORD
         STA     TMPH
         LDA     ESTKL+0,X    ; Y COORD
@@ -120,10 +120,10 @@ end
 //
 export asm grVLin(y1, y2, x)#0
         ; GET ROW BUFFER ADDRESSES
-		LDA     $3000
+                LDA     $3000
         STA     SRCL
         LDA     $3001
-		STA		SRCH
+                STA             SRCH
         LDA     ESTKL+2,X   ; Y1 COORD
 -       AND     #$FE
         TAY
@@ -160,10 +160,10 @@ end
 //
 export asm grBLT(x, y, width, height, src)#0
         ; GET ROW BUFFER ADDRESSES
-		LDA     $3000
+                LDA     $3000
         STA     DSTL
         LDA     $3001
-		STA		DSTH
+                STA             DSTH
         LDA     ESTKL,X     ; SPRITE
         STA     SRCL
         LDA     ESTKH,X
@@ -252,10 +252,10 @@ end
 //
 export asm grTile(x, y, src)#0
         ; GET ROW BUFFER ADDRESSES
-		LDA     $3000
+                LDA     $3000
         STA     DSTL
         LDA     $3001
-		STA		DSTH
+                STA             DSTH
         STX     ESP
         LDA     ESTKL,X     ; TILE
         STA     SRCL
@@ -407,6 +407,28 @@ asm _grFillTile
         RTS
 end
 //
+// Wait for VLB
+//
+export asm grVLB#0
+        LDA     $BF98
+        AND     #$C0
+        CMP     #$80
+        BNE     +
+        PHP
+        SEI
+        STA     $C079   ; Enable IOU access and reset VBL int on //c
+        STA     $C05B   ; Enable VBL int
+-       LDA     $C019
+        STA     $C079   ; Reset VBL int on //c
+        BMI     -
+-       LDA     $C019
+        BPL     -
+        STA     $C05A   ; Disable VBL int on //c
+        STA     $C078   ; Disable IOU access on //c
+        PLP
++       RTS
+end
+//
 // Clear the buffer
 //
 export def grClear(clr)#0
@@ -421,33 +443,50 @@ end
 // Set lores graphics, return draw buffer
 //
 export def grMode(mode)#1
-    if mode
-        //
-        // Set GR mode
-        //
-        ^showlores
-        ^showfull
-        ^showgraphics
-        ^showpage1
-        ^ena80   = 0
-        ^show40  = 0
-        ^mapmain = 0
-        ^an3off
-        drawpage = 1
-        drawbuff = grbuff[1]
-        return 1
-    fin
-    //
-    // Set text mode
-    //
-    ^showtext
-    ^showpage1
-    ^ena80   = 0
-    ^show40  = 0
-    ^mapmain = 0
-    ^an3off
-    call($FC58, 0, 0, 0, 0) // home()
-    return 0
+    when mode
+        is page1
+            //
+            // Set GR mode
+            //
+            ^showlores
+            ^showfull
+            ^showgraphics
+            ^showpage1
+            ^ena80   = 0
+            ^show40  = 0
+            ^mapmain = 0
+            ^an3off
+            drawpage = page2
+            drawbuff = grbuff[page2]
+            break
+        is page2
+            //
+            // Set GR mode
+            //
+            ^showlores
+            ^showfull
+            ^showgraphics
+            ^showpage2
+            ^ena80   = 0
+            ^show40  = 0
+            ^mapmain = 0
+            ^an3off
+            drawpage = page1
+            drawbuff = grbuff[page1]
+            break
+        otherwise
+            //
+            // Set text mode
+            //
+            ^showtext
+            ^showpage1
+            ^ena80   = 0
+            ^show40  = 0
+            ^mapmain = 0
+            ^an3off
+            call($FC58, 0, 0, 0, 0) // home()
+    wend
+    return mode
 end
 //
 // Set display page, return other page
@@ -458,6 +497,7 @@ export def grShow(page)#1
     return page ^ 1
 end
 export def grSwap#0
+    //vlbWait
     ^(showpage1 + drawpage)
     drawpage   = drawpage ^ 1
     drawbuff = grbuff[drawpage]
@@ -490,4 +530,8 @@ grBLT:1        = @drawbuff
 grBLT:6        = @drawbuff+1
 grTile:1       = @drawbuff
 grTile:6       = @drawbuff+1
+//
+// Keep module in memory
+//
+return modkeep
 done

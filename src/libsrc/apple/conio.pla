@@ -1,4 +1,5 @@
 include "inc/cmdsys.plh"
+include "inc/conio.plh"
 sysflags nojitc // Keep tone() from compiling and sounding different
 //
 // Handy constants.
@@ -33,24 +34,6 @@ const page2        = 1
 // Apple III hardware constants.
 //
 const ENV_REG      = $FFDF
-//
-// External interface.
-//
-struc t_conio
-    word keypressed
-    word getkey
-    word echo
-    word home
-    word gotoxy
-    word viewport
-    word texttype
-    word textmode
-    word grmode
-    word grcolor
-    word grplot
-    word tone
-    word rnd
-end
 //
 // Predefined functions.
 //
@@ -97,6 +80,7 @@ word                = $0850,$08D0,$0950,$09D0,$0A50,$0AD0,$0B50,$0BD0
 byte textbwmode[]   = 2, 16, 0
 byte textclrmode[]  = 2, 16, 1
 byte grcharset[]    = 1, 0, $7F, $7F, $7F, $7F, $00, $00, $00, $00
+byte a3keyqueue     = 0
 //
 // Random number for Apple 1 and III.
 //
@@ -168,7 +152,13 @@ end
 // Apple 1 routines.
 //
 def a1keypressed
-    return ^$D011 >= 128
+    return ^$D011 >= 128 ?? ^$D011 :: 0
+end
+def a1getkey
+    while not a1keypressed
+        randnum = randnum + 123
+    loop
+    return getc()
 end
 def a12echo(state)
     return 0
@@ -215,7 +205,7 @@ end
 // Apple II routines.
 //
 def a2keypressed
-    return ^keyboard >= 128
+    return ^keyboard >= 128 ?? ^keyboard :: 0
 end
 def a2home
     //curshpos = 0
@@ -238,7 +228,7 @@ def a2viewport(left, top, width, height)
     ^$20 = left
     ^$21 = width
     ^$22 = top
-    ^$23 = height + top - 1
+    ^$23 = height + top
     return a2gotoxy(0, 0)
 end
 def a2texttype(type)
@@ -295,8 +285,22 @@ def dev_status(devnum, code, list)
 end
 def a3keypressed
     byte count
+
     dev_status(cmdsys.devcons, 5, @count)
-    return count
+    if count
+        a3keyqueue = getc
+    fin
+    return a3keyqueue ?? a3keyqueue | $80 :: 0
+end
+def a3getkey
+    byte keycode
+    repeat
+        randnum = randnum + 123
+        a3keypressed
+        keycode = a3keyqueue
+    until keycode
+    a3keyqueue = 0
+    return keycode
 end
 def a3echo(state)
     return dev_control(cmdsys.devcons, 11, @state)
@@ -379,12 +383,6 @@ end
 //
 // Apple 1 and III combined routines.
 //
-def a13getkey
-    while not conio:keypressed()
-        randnum = randnum + 123
-    loop
-    return getc()
-end
 def a13rnd
     randnum = (randnum << 1) + randnum + 123
     return randnum & $7FFF
@@ -395,7 +393,7 @@ end
 when MACHID & MACHID_MODEL
     is MACHID_III
         conio:keypressed = @a3keypressed
-        conio:getkey     = @a13getkey
+        conio:getkey     = @a3getkey
         conio:echo       = @a3echo
         conio:home       = @a3home
         conio:gotoxy     = @a3gotoxy
@@ -408,7 +406,7 @@ when MACHID & MACHID_MODEL
         break
     is MACHID_I
         conio:keypressed = @a1keypressed
-        conio:getkey     = @a13getkey
+        conio:getkey     = @a1getkey
         conio:home       = @a1home
         conio:gotoxy     = @a1gotoxy
         conio:viewport   = @a1viewport
@@ -420,4 +418,8 @@ when MACHID & MACHID_MODEL
         break
     otherwise // MACHID_II        puts("Found MACHID_MODEL = $"); putb(MACHID & MACHID_MODEL); putln
 wend
+//
+// Keep module in memory
+//
+return modkeep
 done

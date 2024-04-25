@@ -198,14 +198,18 @@ def emit_select(tag)#0
     emit_byte($52)
     emit_reladdr(tag)
 end
-def emit_caseblock(cnt, oflist, taglist)#0
+def emit_caseblock(cnt, oflist, typlist, taglist)#0
     byte i
 
     if not cnt or cnt > 256; exit_err(ERR_OVER|ERR_STATE); fin
     emit_pending_seq
     emit_byte(cnt)
     for i = 0 to cnt-1
-        emit_word(oflist=>[i])
+        if typlist=>[i] == CONSTADDR_TYPE
+            emit_addr(oflist=>[i], 0)
+        else
+            emit_word(oflist=>[i])
+        fin
         emit_reladdr(taglist=>[i])
     next
 end
@@ -449,6 +453,7 @@ end
 def idmatch(nameptr, len, idptr, idcnt)
     byte i
 
+    if len > ID_LEN; len = ID_LEN; fin
     while idcnt
         if len == idptr->idname
             i = 1; while i <= len and nameptr->[i - 1] == idptr->idname.[i]; i++; loop
@@ -516,6 +521,7 @@ def size_iddata(type, varsize, initsize)#0
 end
 def new_idglobal(nameptr, len, type, value, cparms, cvals)#0
     if idmatch(nameptr, len, idglobal_tbl, globals); exit_err(ERR_DUP|ERR_ID); fin
+    if len > ID_LEN; len = ID_LEN; fin
     lastglobal=>idval     = value
     lastglobal=>idtype    = type
     lastglobal->funcparms = cparms
@@ -588,6 +594,7 @@ def init_idglobal#0
 end
 def new_idlocal(nameptr, len, type, size)#0
     if idmatch(nameptr, len, @idlocal_tbl, locals); exit_err(ERR_DUP|ERR_ID); fin
+    if len > ID_LEN; len = ID_LEN; fin
     lastlocal=>idval  = framesize
     lastlocal=>idtype = type | LOCAL_TYPE
     nametostr(nameptr, len, lastlocal + idname)

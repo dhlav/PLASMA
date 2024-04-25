@@ -6,10 +6,14 @@ import dgrlib
     predef dgrTile(x, y, src)#0
     predef dgrTileStr(x, y, tilestr, strlen, tilebuff)#0
     predef dgrFill(x, y, tile)#0
+    predef dgrVLB#0
     predef dgrClear(clr)#0
     predef dgrMode(mode)#1
     predef dgrShow(page)#1
     predef dgrSwap#0
     predef dgrDrawBuf(page)#0
     predef dgrColor(clr)#0
+    const  dgrPage1 =  0
+    const  dgrPage2 =  1
+    const  dgrOff   = -1
 end

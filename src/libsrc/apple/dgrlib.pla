@@ -52,10 +52,10 @@ end
 //
 export asm dgrPlot(x, y)#0
         ; GET ROW BUFFER ADDRESSES
-		LDA     $3000
+                LDA     $3000
         STA     SRCL
         LDA     $3001
-		STA		SRCH
+                STA             SRCH
         STX     ESP
         LDA     ESTKL,X     ; Y COORD
         AND     #$FE
@@ -84,10 +84,10 @@ end
 //
 export asm dgrHLin(x1, x2, y)#0
         ; GET ROW BUFFER ADDRESSES
-		LDA     $3000
+                LDA     $3000
         STA     SRCL
         LDA     $3001
-		STA		SRCH
+                STA             SRCH
         STX     ESP
         LDA     ESTKL+1,X    ; X2 COORD
         STA     TMPH
@@ -126,10 +126,10 @@ end
 //
 export asm dgrVLin(y1, y2, x)#0
         ; GET ROW BUFFER ADDRESSES
-		LDA     $3000
+                LDA     $3000
         STA     SRCL
         LDA     $3001
-		STA		SRCH
+                STA             SRCH
         STX     ESP
         LDA     ESTKL+2,X   ; Y1 COORD
         PHP
@@ -165,10 +165,10 @@ end
 //
 export asm dgrBLT(x, y, width, height, src)#0
         ; GET ROW BUFFER ADDRESSES
-		LDA     $3000
+                LDA     $3000
         STA     DSTL
         LDA     $3001
-		STA		DSTH
+                STA             DSTH
         LDA     ESTKL,X     ; SPRITE
         STA     SRCL
         LDA     ESTKH,X
@@ -325,10 +325,10 @@ end
 //
 export asm dgrTile(x, y, src)#0
         ; GET ROW BUFFER ADDRESSES
-		LDA     $3000
+                LDA     $3000
         STA     DSTL
         LDA     $3001
-		STA		DSTH
+                STA             DSTH
         STX     ESP
         LDA     ESTKL,X       ; TILE
         STA     SRCL
@@ -492,39 +492,23 @@ asm _dgrFillTile
         RTS
 end
 //
-// Wait for VLB - Only IIe/IIGS.
+// Wait for VLB
 //
-asm vlbWait#0
+export asm dgrVLB#0
+        PHP
+        SEI
+        STA     $C079   ; Enable IOU access and reset VBL int on //c
+        STA     $C05B   ; Enable VBL int
 -       LDA     $C019
+        STA     $C079   ; Reset VBL int on //c
         BMI     -
 -       LDA     $C019
         BPL     -
+        STA     $C05A   ; Disable VBL int on //c
+        STA     $C078   ; Disable IOU access on //c
+        PLP
         RTS
 end
-// Wait for VBL on IIc is entirely different from others.
-// Setup, one-time *only* if polling will be used exclusively.
-// Otherwise requires restoring the mode on exit,
-// and setting up per-use instead.
-//   [php]
-//   sei         ; otherwise interrupt is still raised
-//   sta   $C07F ; enable access to VBL register
-//   sta   $C05B ; enable VBL polling
-//   sta   $C07E ; disable access to VBL register
-//
-// wait for VBL:
-// - bit   $C019
-//   bpl   -
-//   lda   $C070 ; $c019 bit 7 is sticky, reset it
-//
-// To allow other methods of VBL, restore access:
-// - bit   $C019
-//   bpl   -
-//   lda   $C070 ; $c019 bit 7 is sticky, reset it
-//   sta   $C07F ; enable access to VBL register
-//   sta   $C05A ; disable VBL polling
-//   sta   $C07E ; disable access to VBL register
-//   [plp]
-
 //
 // Clear the buffer
 //
@@ -536,32 +520,48 @@ export def dgrClear(clr)#0
     dgrFill(0, 0, @clrtile)
 end
 export def dgrMode(mode)#1
-    if mode
-        //
-        // Set double lores graphics, return draw buffer
-        //
-        ^showlores
-        ^showfull
-        ^showgraphics
-        ^showpage1
-        ^ena80  = 0
-        ^show80 = 0
-        ^an3on
-        drawpage = 1
-        drawbuff = dgrbuff[1]
-        return 1
-    fin
-    //
-    // Set text mode
-    //
-    ^showtext
-    ^showpage1
-    ^ena80   = 0
-    ^show40  = 0
-    ^mapmain = 0
-    ^an3off
-    call($FC58, 0, 0, 0, 0) // home()
-    return 0
+    when mode
+        is page1
+            //
+            // Set double lores graphics, return draw buffer
+            //
+            ^showlores
+            ^showfull
+            ^showgraphics
+            ^showpage1
+            ^ena80  = 0
+            ^show80 = 0
+            ^an3on
+            drawpage = page2
+            drawbuff = dgrbuff[page2]
+            break
+        is page2
+            //
+            // Set double lores graphics, return draw buffer
+            //
+            ^showlores
+            ^showfull
+            ^showgraphics
+            ^showpage1
+            ^ena80  = 0
+            ^show80 = 0
+            ^an3on
+            drawpage = page1
+            drawbuff = dgrbuff[page1]
+            break
+        otherwise
+            //
+            // Set text mode
+            //
+            ^showtext
+            ^showpage1
+            ^ena80   = 0
+            ^show40  = 0
+            ^mapmain = 0
+            ^an3off
+            call($FC58, 0, 0, 0, 0) // home()
+        wend
+    return mode
 end
 //
 // Set display page, return other page
@@ -623,4 +623,8 @@ dgrTile:1       = @drawbuff
 dgrTile:6       = @drawbuff+1
 // Put read AUX mem routine in scary location
 memcpy($0100, @auxRead, 9)
+//
+// Keep module in memory
+//
+return modkeep
 done

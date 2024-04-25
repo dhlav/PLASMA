@@ -993,11 +993,27 @@ def keyin3
     return key | $80
 end
 def keyin2e
-    byte key
+    byte key, vbl
+    ^$C079 = 0 // IOU enable and clear VBL int on //c
+    ^$C05B = 0 // Enable VBL Ints on //c
+    vbl    = ^$C019
     repeat
-        cursflash
+        if flags & showcurs
+            if flash == 0
+                ^cursptr = curschr
+            elsif flash == 128
+                ^cursptr = underchr
+            fin
+            if vbl ^ ^$C019
+                flash = flash + 8
+                vbl = ^$C019
+                ^$C079 = 0 // Clear VBL int on //c
+            fin
+        fin
         key = ^keyboard
     until key >= 128
+    ^$C05A = 0 // Disable VBL Ints on //c
+    ^$C078 = 0 // IOU disable on //c
     ^keystrobe
     if ^pushbttn2 & 128 // Closed Apple pressed
         when key
@@ -1615,7 +1631,7 @@ def cmdmode#0
     word cmdptr, line
 
     clrscrn
-    puts("PLASMA Editor, Version 2.0 ALPHA2\n")
+    puts("PLASMA Editor, Version 2.1\n")
     while not exit
         puts(@filename)
         cmdptr = gets($BA)

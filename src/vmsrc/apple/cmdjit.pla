@@ -52,16 +52,19 @@ predef markheap()#1, allocheap(size)#1, allocalignheap(size, pow2, freeaddr)#1, 
 predef memset(addr,value,size)#0, memcpy(dst,src,size)#0, strcpy(dst,src)#1, strcat(dst,src)#1
 predef uword_isgt(a,b)#1, uword_isge(a,b)#1, uword_islt(a,b)#1, uword_isle(a,b)#1, sext(a)#1, divmod(a,b)#2
 predef execmod(modfile)#1, open(path)#1, close(refnum)#1, read(refnum, buf, len)#1
+predef lookuptbl(dci)#1, execsys(sysfile)#0
 //
 // Exported CMDSYS table
 //
-word version    = $0200 // 02.00 Dev
+word version    = $0211 // 02.11
 word syspath
 word syscmdln
-word            = @execmod, @open, @close, @read, 0 // Mark write() as NULL
+word            = @execmod, @open, @close, @read, 0
 byte perr
 byte jitcount   = 0
 byte jitsize    = 0
+word            = @execsys // Different between Apple II and ///
+word            = @lookuptbl
 //
 // Working input buffer overlayed with strings table
 //
@@ -90,7 +93,6 @@ byte hpalignstr = "HEAPALLOCALIGN"
 byte hpallocstr = "HEAPALLOC"
 byte hprelstr   = "HEAPRELEASE"
 byte hpavlstr   = "HEAPAVAIL"
-byte sysmods[] // overlay with exported strings
 word memsetstr  = "MEMSET"
 byte memcpystr  = "MEMCPY"
 byte uisgtstr   = "ISUGT"
@@ -102,7 +104,6 @@ byte divmodstr  = "DIVMOD"
 byte machidstr  = "MACHID"
 byte sysstr     = "SYSCALL"
 byte callstr    = "CALL"
-byte prefix[] // overlay with exported symbols table
 word exports    = @sysmodstr, @version
 word            = @sysstr,    @syscall
 word            = @callstr,   @call
@@ -116,6 +117,7 @@ word            = @getcstr,   @cin
 word            = @getsstr,   @rdstr
 word            = @toupstr,   @toupper
 word            = @hpmarkstr, @markheap
+byte sysmods[] // overlay with exported strings
 word            = @hpallocstr,@allocheap
 word            = @hpalignstr,@allocalignheap
 word            = @hprelstr,  @releaseheap
@@ -597,29 +599,29 @@ end
 //
 // Lookup routines.
 //
-//def lookuptbl(dci, tbl)
-//    word match
-//    while ^tbl
+//def lookuptbl(dci)
+//    word match, tbl
+//    sym = symtbl
+//    while ^sym
 //        match = dci
-//        while ^tbl == ^match
-//            if !(^tbl & $80)
+//        while ^sym == ^match
+//            if !(^sym & $80)
 //                return (tbl):1
 //            fin
-//            tbl   = tbl   + 1
-//            match = match + 1
+//            tbl++
+//            match++
 //        loop
-//        while (^tbl & $80)
-//            tbl = tbl + 1
+//        while (^sym & $80)
+//            sym = sym + 1
 //        loop
-//        tbl = tbl + 3
+//        sym = sym + 3
 //    loop
 //    return 0
-asm lookuptbl(dci, tbl)#1
-        LDA     ESTKL,X
+asm lookuptbl(dci)#1
+        LDA     #$00                ; SYMBOL TABLE
         STA     DSTL
-        LDA     ESTKH,X
+        LDA     #$0C
         STA     DSTH
-        INX
         LDA     ESTKL,X
         STA     SRCL
         LDA     ESTKH,X
@@ -770,25 +772,42 @@ asm reloc(modfix, modofst, bytecode, rld)#3
         LDY     #$00
 -       LDA     (SRC),Y
         BEQ     RLDEX       ; END OF RLD
-        PHA
         INY
         LDA     (SRC),Y
-        INY
         CLC
         ADC     ESTKL+3,X   ; ADDR=ENTRY=>1+MODFIX
         STA     DSTL
+        INY
         LDA     (SRC),Y
         ADC     ESTKH+3,X
         STA     DSTH
-        PLA
+        LDY     #$00
+        LDA     (SRC),Y
         AND     #$10        ; EXTERN REF - EXIT
         BNE     RLDEX
-        TAY                 ; FIXUP=*ADDR+MODOFST
+        LDA     (SRC),Y
+        BMI     FIX16
+        AND     #$40
+        BNE     FIXMSB
+FIXLSB  LDA     (DST),Y
+        CLC
+        ADC     ESTKL+2,X
+        CLC
+        BCC     FIX8
+FIXMSB  LDY     #$03
+        LDA     (SRC),Y     ; FIXUPH=(ENTRY->3+MODOFSTL)+(^ADDR+MODOFSTH)
+        CLC
+        ADC     ESTKL+2,X
+        LDY     #$00
         LDA     (DST),Y
-        INY
+        ADC     ESTKH+2,X
+        CLC
+        BCC     FIX8
+FIX16   LDA     (DST),Y     ; FIXUP=*ADDR+MODOFST
         CLC
         ADC     ESTKL+2,X
         STA     TMPL
+        INY
         LDA     (DST),Y
         ADC     ESTKH+2,X
         CMP     ESTKH+1,X   ; FIXUP >= BYTECODE?
@@ -802,7 +821,7 @@ asm reloc(modfix, modofst, bytecode, rld)#3
 +       STA     (DST),Y     ; *ADDR=FIXUP
         DEY
         LDA     TMPL
-        STA     (DST),Y
+FIX8    STA     (DST),Y
         LDA     SRCL        ; NEXT ENTRY
 ;       CLC
         ADC     #$04
@@ -927,26 +946,26 @@ def allocxheap(size)#1
     word xaddr
     xaddr = xheap
     xheap = xheap + size
-    if systemflags & restxt1
-        if uword_isle(xaddr, $0800) and uword_isgt(xheap, $0400)
+    if systemflags & resxtxt1
+        if uword_islt(xaddr, $0800) and uword_isgt(xheap, $0400)
             xaddr = $0800
             xheap = xaddr + size
         fin
     fin
-    if systemflags & restxt2
-        if uword_isle(xaddr, $0C00) and uword_isgt(xheap, $0800)
+    if systemflags & resxtxt2
+        if uword_islt(xaddr, $0C00) and uword_isgt(xheap, $0800)
             xaddr = $0C00
             xheap = xaddr + size
         fin
     fin
     if systemflags & resxhgr1
-        if uword_isle(xaddr, $4000) and uword_isgt(xheap, $2000)
+        if uword_islt(xaddr, $4000) and uword_isgt(xheap, $2000)
             xaddr = $4000
             xheap = xaddr + size
         fin
     fin
     if systemflags & resxhgr2
-        if uword_isle(xaddr, $6000) and uword_isgt(xheap, $4000)
+        if uword_islt(xaddr, $6000) and uword_isgt(xheap, $4000)
             xaddr = $6000
             xheap = xaddr + size
         fin
@@ -988,10 +1007,10 @@ end
 //
 def lookupextern(esd, index)#1
     word sym, addr
-    byte str[16]
+    byte str[33]
     sym = lookupidx(esd, index)
     if sym
-        addr = lookuptbl(sym, symtbl)
+        addr = lookuptbl(sym)
         if !addr
             perr = $81
             dcitos(sym, @str)
@@ -1069,7 +1088,7 @@ def loadmod(mod)#1
             // Load module dependencies.
             //
             while ^moddep
-                if !lookuptbl(moddep, symtbl)
+                if !lookuptbl(moddep)
                     close(refnum)
                     refnum = 0
                     if loadmod(moddep) < 0
@@ -1193,7 +1212,7 @@ def loadmod(mod)#1
     //
     // Call init routine if it exists.
     //
-    initcode = 0
+    initcode = modkeep
     if init
         init     = init + defofst
         initcode = adddef(deffirst, init, @deflast)()
@@ -1239,9 +1258,6 @@ def catalog(path)#0
     byte i, type, len
     word entry
 
-    if !^path
-        path = @prefix
-    fin
     refnum = open(path)
     if perr
         return
@@ -1364,7 +1380,7 @@ def execsys(sysfile)#0
     fin
 end
 def execmod(modfile)#1
-    byte moddci[17]
+    byte moddci[63]
     word saveheap, savexheap, savesym, saveflags
 
     perr = 1
@@ -1387,26 +1403,28 @@ end
 // Command line processor
 //
 def docmds#0
+    word prefix
+
     loadmod(jitmod)  // Cannot do this in init code - it will overwrite it!
     xheap    = $0400 // Reset heap to point at low memory
     xheaptop = $A000 // Top below JITC
-    strcpy(getlnbuf, @cmdln)
-    while 1
+    prefix   = pfxop(heap, GET_PFX)
+    repeat
         if ^getlnbuf
             strcpy(@cmdln, getlnbuf)
             when toupper(parsecmd(getlnbuf))
                 is 'C'
-                    catalog(getlnbuf)
+                    catalog(^getlnbuf ?? getlnbuf :: prefix)
                     break
                 is 'P'
                     pfxop(getlnbuf, SET_PFX)
                     break
                 is '/'
                     repeat
-                        prefix--
-                    until prefix[prefix] == '/'
-                    if prefix > 1
-                        pfxop(@prefix, SET_PFX)
+                        ^prefix--
+                    until ^(prefix + ^prefix) == '/'
+                    if ^prefix > 1
+                        pfxop(prefix, SET_PFX)
                     fin
                     break
                 is 'V'
@@ -1416,13 +1434,13 @@ def docmds#0
                     execsys(getlnbuf)
                     break
                 is '+'
-					//
-					// Set JIT code pointer
-					//
-					*jitcodeptr = jitcbuf
-					//
-					// Exec module
-					//
+                    //
+                    // Set JIT code pointer
+                    //
+                    *jitcodeptr = jitcbuf
+                    //
+                    // Exec module
+                    //
                     execmod(striptrail(getlnbuf))
                     //
                     // Clean up
@@ -1435,12 +1453,12 @@ def docmds#0
             if perr
                 prstr("ERR:$")
                 prbyte(perr)
-		crout()
+                crout()
             fin
         fin
-        prstr(pfxop(@prefix, GET_PFX))
+        prstr(pfxop(prefix, GET_PFX))
         rdstr($BA)
-    loop
+    until 0
 end
 //
 // Dummy definition to get free heap
@@ -1454,7 +1472,7 @@ heap = @lastdef
 //
 // Print PLASMA version
 //
-prstr("PLASMA 2.0 ALPHA1 128K\n")//; prbyte(version.1); cout('.'); prbyte(version.0); crout
+prstr("PLASMA 2.11 128K\n")
 //
 // Init symbol table.
 //
@@ -1466,7 +1484,7 @@ loop
 //
 // Set system path
 //
-strcat(strcpy(@sysmods, $300), "SYS/")) // This is the path to CMD
+strcat(strcpy(@sysmods, $300), "SYS/") // This is the path to CMD
 syspath  = @sysmods // Update external interface table
 syscmdln = @cmdln
 //
@@ -1475,13 +1493,14 @@ syscmdln = @cmdln
 autorun = open(@autorun)
 if autorun
     cmdln = read(autorun, @cmdln+1, 81)
+    strcpy(getlnbuf, @cmdln)
     close(0)
 else
+    ^getlnbuf = 0
     //
     // Print some startup info.
     //
     prstr("MEM FREE:$"); prword(availheap); crout
 fin
-pfxop(@prefix, GET_PFX)
 docmds
 done

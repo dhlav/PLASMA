@@ -1,11 +1,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include "plasm.h"
 #define LVALUE      0
 #define RVALUE      1
 #define MAX_LAMBDA  64
 
+int id_match(char *name, int len, char *id);
 int parse_mods(void);
 
 int infunc = 0, break_tag = 0, cont_tag = 0, stack_loop = 0;
@@ -558,7 +560,7 @@ t_opseq *parse_value(t_opseq *codeseq, int rvalue, int *stackdepth)
                 parse_error("Using BYTE value as a pointer");
             else
                 deref++;
-            type = (type & PTR_TYPE) | (scantoken == PTRB_TOKEN) ? BYTE_TYPE : WORD_TYPE; // Type override
+            type = (type & PTR_TYPE) | ((scantoken == PTRB_TOKEN) ? BYTE_TYPE : WORD_TYPE); // Type override
             if (!parse_const(&const_offset))
             {
                 /*
@@ -802,7 +804,8 @@ t_opseq *parse_expr(t_opseq *codeseq, int *stackdepth)
         codeseq = gen_codetag(codeseq, tag_endtri);
     }
     return (codeseq);
-}t_opseq *parse_set(t_opseq *codeseq)
+}
+t_opseq *parse_set(t_opseq *codeseq)
 {
     char *setptr = tokenstr;
     int lparms = 0, rparms = 0;
@@ -847,7 +850,7 @@ int parse_stmnt(void)
 {
     int tag_prevbrk, tag_prevcnt, tag_else, tag_endif, tag_while, tag_wend, tag_repeat, tag_for, tag_choice, tag_of;
     int type, addr, step, cfnvals, constsize, casecnt, i;
-    int *caseval, *casetag;
+    int *caseval, *casetyp, *casetag;
     long constval;
     char *idptr;
     t_opseq *seq, *fromseq, *toseq;
@@ -1049,6 +1052,7 @@ int parse_stmnt(void)
             break_tag   = tag_new(BRANCH_TYPE);
             tag_choice  = tag_new(BRANCH_TYPE);
             caseval     = malloc(sizeof(int)*256);
+            casetyp     = malloc(sizeof(int)*256);
             casetag     = malloc(sizeof(int)*256);
             casecnt     = 0;
             if (!(seq = parse_expr(NULL, &cfnvals)))
@@ -1067,7 +1071,7 @@ int parse_stmnt(void)
                 {
                     tag_of   = tag_new(BRANCH_TYPE);
                     constval = 0;
-                    parse_constexpr(&constval, &constsize);
+                    type = parse_constexpr(&constval, &constsize);
                     i = casecnt;
                     while ((i > 0) && (caseval[i-1] > constval))
                     {
@@ -1075,12 +1079,14 @@ int parse_stmnt(void)
                         // Move larger case consts up
                         //
                         caseval[i] = caseval[i-1];
+                        casetyp[i] = casetyp[i-1];
                         casetag[i] = casetag[i-1];
                         i--;
                     }
                     if ((i < casecnt) && (caseval[i] == constval))
                         parse_error("Duplicate CASE");
                     caseval[i] = constval;
+                    casetyp[i] = type;
                     casetag[i] = tag_of;
                     casecnt++;
                     emit_codetag(tag_of);
@@ -1096,7 +1102,7 @@ int parse_stmnt(void)
                     else
                         tag_of = 0;
                     emit_codetag(tag_choice);
-                    emit_caseblock(casecnt, caseval, casetag);
+                    emit_caseblock(casecnt, caseval, casetyp, casetag);
                     tag_choice = 0;
                     scan();
                     if (tag_of)
@@ -1114,9 +1120,10 @@ int parse_stmnt(void)
             {
                 emit_brnch(break_tag);
                 emit_codetag(tag_choice);
-                emit_caseblock(casecnt, caseval, casetag);
+                emit_caseblock(casecnt, caseval, casetyp, casetag);
             }
             free(caseval);
+            free(casetyp);
             free(casetag);
             emit_codetag(break_tag);
             break_tag = tag_prevbrk;
@@ -1221,7 +1228,7 @@ int parse_stmnt(void)
     }
     return (scan() == EOL_TOKEN);
 }
-int parse_var(int type, long basesize)
+int parse_var(int type, long basesize, int ignore_var)
 {
     char *idstr;
     long constval;
@@ -1267,7 +1274,7 @@ int parse_var(int type, long basesize)
         else
             parse_error("Bad variable initializer");
     }
-    else
+    else if (!ignore_var)
     {
         if (idlen)
             id_add(idstr, idlen, type, size);
@@ -1341,7 +1348,7 @@ int parse_struc(void)
     scan();
     return (1);
 }
-int parse_vars(int type)
+int parse_vars(int type, int ignore_vars)
 {
     long value;
     int idlen, size, cfnparms, emit = 0;
@@ -1358,6 +1365,8 @@ int parse_vars(int type)
             emit_sysflags(value);
             break;
         case CONST_TOKEN:
+            if (type & LOCAL_TYPE)
+                parse_error("Cannot define local constant");
             if (scan() != ID_TOKEN)
                 parse_error("Missing variable");
             idstr = tokenstr;
@@ -1406,7 +1415,7 @@ int parse_vars(int type)
                 scan_rewind(tokenstr);
             if (type & WORD_TYPE)
                 cfnvals *= 2;
-            do parse_var(type, cfnvals); while (scantoken == COMMA_TOKEN);
+            do parse_var(type, cfnvals, ignore_vars); while (scantoken == COMMA_TOKEN);
             emit = type == GLOBAL_TYPE;
             break;
         case PREDEF_TOKEN:
@@ -1463,13 +1472,18 @@ int parse_vars(int type)
 }
 int parse_mods(void)
 {
+    int i, ignore_emit;
+
     if (scantoken == IMPORT_TOKEN)
     {
         if (scan() != ID_TOKEN)
             parse_error("Bad import definition");
-        emit_moddep(tokenstr, tokenlen);
+        for (i = 0; i < tokenlen; i++)
+            tokenstr[i] = toupper(tokenstr[i]);
+        if (!(ignore_emit = id_match(tokenstr, tokenlen, modfile)))
+            emit_moddep(tokenstr, tokenlen);
         scan();
-        while (parse_vars(EXTERN_TYPE)) next_line();
+        while (parse_vars(EXTERN_TYPE, ignore_emit)) next_line();
         if (scantoken != END_TOKEN)
             parse_error("Missing END");
         scan();
@@ -1549,7 +1563,7 @@ int parse_defs(void)
     {
         case CONST_TOKEN:
         case STRUC_TOKEN:
-            return parse_vars(GLOBAL_TYPE);
+            return parse_vars(GLOBAL_TYPE, FALSE);
         case EXPORT_TOKEN:
             if (scan() != DEF_TOKEN && scantoken != ASM_TOKEN)
                 parse_error("Bad export definition");
@@ -1617,7 +1631,7 @@ int parse_defs(void)
         /*
          * Parse local vars
          */
-        while (parse_vars(LOCAL_TYPE)) next_line();
+        while (parse_vars(LOCAL_TYPE, FALSE)) next_line();
         emit_enter(cfnparms);
         prevstmnt = 0;
         while (parse_stmnt()) next_line();
@@ -1714,7 +1728,7 @@ int parse_module(void)
     if (next_line())
     {
         while (parse_mods())            next_line();
-        while (parse_vars(GLOBAL_TYPE)) next_line();
+        while (parse_vars(GLOBAL_TYPE, FALSE)) next_line();
         while (parse_defs())            next_line();
         emit_bytecode_seg();
         emit_start();

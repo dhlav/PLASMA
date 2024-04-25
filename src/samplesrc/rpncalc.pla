@@ -5,7 +5,8 @@ include "inc/cmdsys.plh"
 include "inc/fpstr.plh"
 include "inc/fpu.plh"
 include "inc/conio.plh"
-const displayWidth = 16
+const displayWidth = 15
+const displayDefFix = 6
 const inputLen = displayWidth+1
 const ZEROSTR = $3001
 //
@@ -36,8 +37,8 @@ byte inputStr[32] = ""
 //
 // Display format state
 //
-byte displayFix = 6
-byte displayInt = displayWidth - 7 //  - displayFix - 1
+byte displayFix = displayDefFix
+byte displayInt = displayWidth - displayDefFix - 2
 //
 // Store/load memory
 //
@@ -152,9 +153,10 @@ def showStack#0
   byte strFP[displayWidth+1]
 
   for s = 0 to 3
-    fpu:storStr(@strFP, displayInt, displayFix, FPSTR_FIXED, s)
+    fpu:storStr(@strFP, displayInt, displayFix, FPSTR_FIXED|FPSTR_FLEX, s)
     conio:gotoxy(4, 5 - s)
-    repc(displayWidth - strFP - 1, ' ')
+    //repc(displayWidth - strFP - 1, ' ')
+    repc(displayWidth - strFP, ' ')
     puts(@strFP)
   next
 end
@@ -163,7 +165,7 @@ def showMem#0
   byte strFP[displayWidth+1]
 
   for m = 0 to 9
-    ext2str(@memory[m*t_fpureg], @strFP, displayInt, displayFix, FPSTR_FIXED)
+    ext2str(@memory[m*t_fpureg], @strFP, displayInt, displayFix, FPSTR_FIXED|FPSTR_FLEX)
     conio:gotoxy(23, 2 + m)
     repc(displayWidth - strFP - 1, ' ')
     puts(@strFP)
@@ -252,7 +254,7 @@ def delKey(pkey)#0
   showInput
 end
 def dropKey(pkey)#0
-  fpu:pullStr(@inputStr, displayInt, displayFix, FPSTR_STRIP|FPSTR_FLOAT)
+  fpu:pullStr(@inputStr, displayInt, displayFix, FPSTR_STRIP|FPSTR_FLOAT|FPSTR_FLEX)
   if inputStr.1 == ' '
     inputStr--
     memcpy(@inputStr.1, @inputStr.2, inputStr)
@@ -261,7 +263,7 @@ def dropKey(pkey)#0
   showStack
 end
 def copyKey(pkey)#0
-  fpu:storStr(@inputStr, displayInt, displayFix, FPSTR_STRIP|FPSTR_FLOAT, X_REG)
+  fpu:storStr(@inputStr, displayInt, displayFix, FPSTR_STRIP|FPSTR_FLOAT|FPSTR_FLEX, X_REG)
   if inputStr.1 == ' '
     inputStr--
     memcpy(@inputStr.1, @inputStr.2, inputStr)
@@ -380,7 +382,7 @@ def elemsKey(pkey)#0
     is 'L'
       fpu:log2X()
       break
-    is 'E'
+    is 'P'
       fpu:powEX()
       break
     is 'N'
@@ -403,7 +405,7 @@ def cmdKey(pkey)#0
   d = toupper(getc) - '0'
   if d >= 1 and d <= 9
     displayFix = d
-    displayInt = displayWidth - displayFix - 1
+    displayInt = displayWidth - displayFix - 2
   elsif d == 'Q' - '0'
     quit = TRUE
   fin
@@ -422,7 +424,7 @@ end
 def inputKey#0
   byte inkey
   word pkeys
-  
+
   conio:echo(ECHO_OFF)
   while not quit
     pkeys = @keypad
@@ -450,7 +452,7 @@ initInput
 showStack
 showMem
 showInput
-showStatus("Version 0.6")
+showStatus("Version 0.7")
 inputKey
 conio:gotoxy(0, 22)
 done

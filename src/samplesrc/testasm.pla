@@ -1,0 +1,7 @@
+import test
+  predef hello#0
+  predef goodbye#0
+end
+
+goodbye
+done

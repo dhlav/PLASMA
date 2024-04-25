@@ -52,10 +52,11 @@ predef markheap()#1, allocheap(size)#1, allocalignheap(size, pow2, freeaddr), re
 predef memset(addr,value,size)#0, memcpy(dst,src,size)#0
 predef uword_isgt(a,b)#1, uword_isge(a,b)#1, uword_islt(a,b)#1, uword_isle(a,b)#1, sext(a)#1, divmod(a,b)#2
 predef execmod(modfile)#1, open(path)#1, close(refnum)#1, read(refnum, buff, len)#1, write(refnum, buff, len)#1
+predef syslookuptbl(dci)#1
 //
 // Exported CMDSYS table
 //
-word version      = $0200 // 02.00
+word version      = $0211 // 02.11
 word syspath
 word cmdlnptr
 word              = @execmod, @open, @close, @read, @write
@@ -64,6 +65,7 @@ byte jitcount     = 0
 byte jitsize      = 0
 byte refcons      = 0
 byte devcons      = 0
+word              = @syslookuptbl
 //
 // String pool.
 //
@@ -117,7 +119,6 @@ byte uisltstr[]   = "ISULT"
 byte uislestr[]   = "ISULE"
 byte sextstr[]    = "SEXT"
 byte divmodstr[]  = "DIVMOD"
-byte sysmods[]    = "" // overlay sys path with exports
 word exports[]    = @sysmodstr, @version
 word              = @sysstr,    @syscall
 word              = @callstr,   @call
@@ -130,6 +131,7 @@ word              = @putwstr,   @prword
 word              = @getcstr,   @cin
 word              = @getsstr,   @rdstr
 word              = @toupstr,   @toupper
+byte sysmods[] // overlay sys path with exports
 word              = @hpmarkstr, @markheap
 word              = @hpallocstr,@allocheap
 word              = @hpalignstr,@allocalignheap
@@ -740,25 +742,42 @@ asm reloc(modfix, modofst, bytecode, rld)#3
         LDY     #$00
 -       LDA     (SRC),Y
         BEQ     RLDEX       ; END OF RLD
-        PHA
         INY
         LDA     (SRC),Y
-        INY
         CLC
         ADC     ESTKL+3,X   ; ADDR=ENTRY=>1+MODFIX
         STA     DSTL
+        INY
         LDA     (SRC),Y
         ADC     ESTKH+3,X
         STA     DSTH
-        PLA
+        LDY     #$00
+        LDA     (SRC),Y
         AND     #$10        ; EXTERN REF - EXIT
         BNE     RLDEX
-        TAY                 ; FIXUP=*ADDR+MODOFST
+        LDA     (SRC),Y
+        BMI     FIX16
+        AND     #$40
+        BNE     FIXMSB
+FIXLSB  LDA     (DST),Y
+        CLC
+        ADC     ESTKL+2,X
+        CLC
+        BCC     FIX8
+FIXMSB  LDY     #$03
+        LDA     (SRC),Y     ; FIXUPH=(ENTRY->3+MODOFSTL)+(^ADDR+MODOFSTH)
+        CLC
+        ADC     ESTKL+2,X
+        LDY     #$00
         LDA     (DST),Y
-        INY
+        ADC     ESTKH+2,X
+        CLC
+        BCC     FIX8
+FIX16   LDA     (DST),Y     ; FIXUP=*ADDR+MODOFST
         CLC
         ADC     ESTKL+2,X
         STA     TMPL
+        INY
         LDA     (DST),Y
         ADC     ESTKH+2,X
         CMP     ESTKH+1,X   ; FIXUP >= BYTECODE?
@@ -772,7 +791,7 @@ asm reloc(modfix, modofst, bytecode, rld)#3
 +       STA     (DST),Y     ; *ADDR=FIXUP
         DEY
         LDA     TMPL
-        STA     (DST),Y
+FIX8    STA     (DST),Y
         LDA     SRCL        ; NEXT ENTRY
 ;       CLC
         ADC     #$04
@@ -794,6 +813,9 @@ RLDEX   INX
         LDA     SRCH
         STA     ESTKH+2,X
         RTS
+end
+def syslookuptbl(dci)#1
+    return lookuptbl(dci, symtbl)
 end
 //
 // SOS routines
@@ -1014,7 +1036,7 @@ end
 //
 def lookupextern(esd, index)#1
     word sym, addr
-    byte str[16]
+    byte str[33]
     sym = lookupidx(esd, index)
     if sym
         addr = lookuptbl(sym, symtbl)
@@ -1232,7 +1254,7 @@ def loadmod(mod)#1
     //
     // Call init routine if it exists.
     //
-    initcode = 0
+    initcode = modkeep
     if init
         initcode = adddef(deffirst, defext, init + defofst, @deflast)()
         if initcode < 0
@@ -1242,25 +1264,24 @@ def loadmod(mod)#1
     return initcode
 end
 def execmod(modfile)#1
-    byte moddci[17]
-    word saveheap, savesym, saveflags
+    byte moddci[63]
+    word saveheap, savesym, saveflags, savemodid
 
     perr = 1
     if stodci(modfile, @moddci)
         saveheap  = heap
         savesym   = lastsym
         saveflags = systemflags
+        savemodid = modid
         if loadmod(@moddci) < modkeep
             lastsym     = savesym
             heap        = saveheap
-            while modid
+            while modid > savemodid
                 modid--
                 seg_release(modseg[modid])
             loop
             xpokeb(symtbl.0, lastsym, 0)
             systemflags = saveflags
-        else
-            modid = 0
         fin
     fin
     return -perr
@@ -1286,7 +1307,7 @@ cmdlnptr = @cmdln
 // Print PLASMA version
 //
 init_cons
-prstr("PLASMA 2.0 ALPHA1 JITC\n")//; putb(version.1); putc('.'); putb(version.0); putln
+prstr("PLASMA 2.11 JITC\n")
 prstr("MEM:$"); prword(availheap); crout
 //
 // Exec command line parser

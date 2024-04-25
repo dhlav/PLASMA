@@ -51,6 +51,9 @@ ALTWRON =       $C005
         !SOURCE "vmsrc/plvmzp.inc"
 PSR     =       TMP+2
 HWSP    =       PSR+1
+VM16SP  =       HWSP+1
+VM16RETX =      VM16SP+1
+VM16RETIP=      VM16RETX+1
 DROP    =       $EF
 NEXTOP  =       DROP+1
 FETCHOP =       NEXTOP+1
@@ -210,7 +213,7 @@ RAMDONE ;CLI UNTIL I KNOW WHAT TO DO WITH THE UNENHANCED IIE
         JSR     PRODOS          ; GET PREFIX
         !BYTE   $C7
         !WORD   GETPFXPARMS
-        LDY     STRBUF          ; APPEND "CMDJIT"
+        LDY     STRBUF          ; APPEND "CMD128"
         LDA     #"/"
         CMP     STRBUF,Y
         BEQ     +
@@ -269,7 +272,7 @@ OPTBL   !WORD   ZERO,CN,CN,CN,CN,CN,CN,CN                               ; 00 02 
         !WORD   NEG,COMP,BAND,IOR,XOR,SHL,SHR,IDXW                      ; 90 92 94 96 98 9A 9C 9E
         !WORD   BRGT,BRLT,INCBRLE,ADDBRLE,DECBRGE,SUBBRGE,BRAND,BROR    ; A0 A2 A4 A6 A8 AA AC AE
         !WORD   ADDLB,ADDLW,ADDAB,ADDAW,IDXLB,IDXLW,IDXAB,IDXAW         ; B0 B2 B4 B6 B8 BA BC BE
-        !WORD   NATV                                                    ; C0
+        !WORD   NATV,JUMPZ,JUMP                                         ; C0 C2 C4
 ;*
 ;* ENTER INTO BYTECODE INTERPRETER - IMMEDIATELY SWITCH TO NATIVE
 ;*
@@ -287,29 +290,19 @@ DINTRP  PHP
         STX     ESP
         TSX
         STX     HWSP
-        LDX     #>OPTBL
+        LDX     #ESTKSZ/2       ; COPY ZERO PAGE EVAL STACK TO HW STACK
+        CPX     ESP
+        BEQ     +
+-       DEX
+        LDY     ESTKH,X
+        PHY
+        LDY     ESTKL,X
+        PHY
+        CPX     ESP
+        BNE     -
++       LDX     #>OPTBL
         STX     OPPAGE
-        LDY     #$00
-        JMP     FETCHOP
-        !AS
-IINTRPX PHP
-        PLA
-        STA     PSR
-        SEI
-        CLC                     ; SWITCH TO NATIVE MODE
-        XCE
-        +ACCMEM16               ; 16 BIT A/M
-        LDY     #$01
-        LDA     (TOS,S),Y
-        DEY
-        STA     IP
-        PLA
-        STX     ESP
-        TSX
-        STX     HWSP
-        STX     ALTRDON
-        LDX     #>OPXTBL
-        STX     OPPAGE
+        LDY     #$00             ; Y MUST BE ZERO FOR ENTER (DON'T CHANGE THIS)
         JMP     FETCHOP
 ;************************************************************
 ;*                                                          *
@@ -388,16 +381,23 @@ CMDENTRY =      *
 ;
 ; INIT VM ENVIRONMENT STACK POINTERS
 ;
-;       LDA     #$00
-        STA     $01FF           ; CLEAR CMDLINE BUFF
-        STA     PPL             ; INIT FRAME POINTER
-        STA     IFPL
+        STZ     $01FF           ; CLEAR CMDLINE BUFF
+        STZ     PPL             ; INIT FRAME POINTER
+        STZ     IFPL
         LDA     #$AF            ; FRAME POINTER AT $AF00, BELOW JIT BUFFER
         STA     PPH
         STA     IFPH
         LDX     #$FE            ; INIT STACK POINTER (YES, $FE. SEE GETS)
         TXS
+        INX
+        STX     VM16SP          ; INIT VM16 RETURN STACK POINTER
         LDX     #ESTKSZ/2       ; INIT EVAL STACK INDEX
+;
+; CLEAR VM16 RETURN IP
+;
+        STZ     VM16RETX
+        STZ     VM16RETIP
+        STZ     VM16RETIP+1
 ;
 ; CHANGE CMD STRING TO SYSPATH STRING
 ;
@@ -456,10 +456,9 @@ PAGE3   =       *
         BIT     LCRDEN+LCBNK2   ; $03DC - INDIRECT INTERPX ENTRY
         JMP     IINTRPX
 }
-DEFCMD  !FILL   28
-ENDBYE  =       *
+DEFCMD  =       *
 }
-LCDEFCMD =      *-28            ; DEFCMD IN LC MEMORY
+LCDEFCMD =      *               ; DEFCMD IN LC MEMORY
 
 ;*****************
 ;*               *
@@ -472,14 +471,47 @@ OPXTBL  !WORD   ZERO,CN,CN,CN,CN,CN,CN,CN                               ; 00 02 
         !WORD   MINUS1,BREQ,BRNE,LA,LLA,CB,CW,CSX                       ; 20 22 24 26 28 2A 2C 2E
         !WORD   DROP,DROP2,DUP,DIVMOD,ADDI,SUBI,ANDI,ORI                ; 30 32 34 36 38 3A 3C 3E
         !WORD   ISEQ,ISNE,ISGT,ISLT,ISGE,ISLE,BRFLS,BRTRU               ; 40 42 44 46 48 4A 4C 4E
-        !WORD   BRNCH,SEL,CALLX,ICALX,ENTER,LEAVEX,RETX,CFFB            ; 50 52 54 56 58 5A 5C 5E
+        !WORD   BRNCH,SEL,CALLX,ICALX,ENTER,LEAVE,RET,CFFB              ; 50 52 54 56 58 5A 5C 5E
         !WORD   LBX,LWX,LLBX,LLWX,LABX,LAWX,DLB,DLW                     ; 60 62 64 66 68 6A 6C 6E
         !WORD   SB,SW,SLB,SLW,SAB,SAW,DAB,DAW                           ; 70 72 74 76 78 7A 7C 7E
         !WORD   LNOT,ADD,SUB,MUL,DIV,MOD,INCR,DECR                      ; 80 82 84 86 88 8A 8C 8E
         !WORD   NEG,COMP,BAND,IOR,XOR,SHL,SHR,IDXW                      ; 90 92 94 96 98 9A 9C 9E
         !WORD   BRGT,BRLT,INCBRLE,ADDBRLE,DECBRGE,SUBBRGE,BRAND,BROR    ; A0 A2 A4 A6 A8 AA AC AE
         !WORD   ADDLBX,ADDLWX,ADDABX,ADDAWX,IDXLBX,IDXLWX,IDXABX,IDXAWX ; B0 B2 B4 B6 B8 BA BC BE
-        !WORD   NATV                                                    ; C0
+        !WORD   NATV,JUMPZ,JUMP                                         ; C0 C2 C4
+;*
+;* INDIRECT ENTRY INTO INTERPRETER
+;*
+        !AS
+IINTRPX PHP
+        PLA
+        STA     PSR
+        SEI
+        CLC                     ; SWITCH TO NATIVE MODE
+        XCE
+_INTRPX +ACCMEM16               ; 16 BIT A/M
+        LDY     #$01
+        LDA     (TOS,S),Y
+        STA     IP
+        PLA                     ; DROP RETURN ADDRESS
+        STX     ESP
+        TSX
+        STX     HWSP
+        LDX     #ESTKSZ/2       ; COPY ZERO PAGE EVAL STACK TO HW STACK
+        CPX     ESP
+        BEQ     +
+-       DEX
+        LDY     ESTKH,X
+        PHY
+        LDY     ESTKL,X
+        PHY
+        CPX     ESP
+        BNE     -
++       STX     ALTRDON
+        LDX     #>OPXTBL
+        STX     OPPAGE
+        LDY     #$00
+        JMP     FETCHOP
 ;*
 ;* JIT PROFILING ENTRY INTO INTERPRETER
 ;*
@@ -494,47 +526,20 @@ JITINTRPX PHP
         LDA     (TOS,S),Y
         DEC
         STA     (TOS,S),Y
+        BNE     _INTRPX
         +ACCMEM16               ; 16 BIT A/M
-        BEQ     RUNJIT
-        LDY     #$01
-        LDA     (TOS,S),Y
-        DEY
-        STA     IP
-        PLA
-        STX     ESP
-        TSX
-        STX     HWSP
-        STX     ALTRDON
-        LDX     #>OPXTBL
-        STX     OPPAGE
-        JMP     FETCHOP
-;
-        !AL
-RUNJIT  PLA                     ; BACK UP DEF ENTRY TO POINT TO JSR
-        SEC
-        SBC     #$0002
+        LDA     JITCOMP
+        STA     TMP
+        PLA                     ; BACK UP STACK ADDRESS TO POINT TO DEF ENTRY BEGINNING
+        DEC                     ; SEC
+        DEC                     ; SBC     #$0002
         PHA
         +ACCMEM8                ; 8 BIT A/M
         DEX                     ; ADD PARAMETER TO DEF ENTRY
         STA     ESTKL,X
         XBA
         STA     ESTKH,X
-        STX     ESP
-        +ACCMEM16               ; 16 BIT A/M
-        LDA     JITCOMP
-        STA     SRC
-        LDY     #$03
-        LDA     (SRC),Y
-        STA     IP
-        TSX
-        DEX                     ; TAKE INTO ACCOUNT JSR BELOW
-        DEX
-        STX     HWSP
-        STX     ALTRDON
-        LDX     #>OPXTBL
-        STX     OPPAGE
-        LDY     #$00
-        JSR     FETCHOP         ; CALL JIT COMPILER
+        JSR     JMPTMP
         !AS                     ; RETURN IN EMULATION MODE
         PLA
         STA     TMPL
@@ -577,15 +582,43 @@ IDXW    PLA
 ;*
 MUL     LDX     #$10
         LDA     NOS,S
-        EOR     #$FFFF
+        CMP     TOS,S
+        BCS     _MULSWP
+-       ASL                     ; SKIP LEADING ZEROS
+        BCS     +
+        DEX
+        BNE     -
+        BEQ     _MULEX
++       EOR     #$FFFF
         STA     TMP
-        LDA     #$0000
+        LDA     TOS,S
+        DEX
+        BEQ     _MULEX
 _MULLP  ASL
         ASL     TMP             ; MULTPLR
         BCS     +
         ADC     TOS,S           ; MULTPLD
 +       DEX
         BNE     _MULLP
+_MULEX  STA     NOS,S           ; PROD
+        JMP     DROP
+_MULSWP LDA     TOS,S
+-       ASL                     ; SKIP LEADING ZEROS
+        BCS     +
+        DEX
+        BNE     -
+        BEQ     _MULEX
++       EOR     #$FFFF
+        STA     TMP
+        LDA     NOS,S
+        DEX
+        BEQ     _MULEX
+_MULSLP ASL
+        ASL     TMP             ; MULTPLR
+        BCS     +
+        ADC     NOS,S           ; MULTPLD
++       DEX
+        BNE     _MULSLP
         STA     NOS,S           ; PROD
         JMP     DROP
 ;*
@@ -646,18 +679,7 @@ MOD     JSR     _DIV
 ;*
 ;* DIVMOD TOS-1 BY TOS - !!!HACK!!! MUST COPY ESTK TO HW STACK
 ;*
-DIVMOD  +ACCMEM8
-        LDX     ESP
-        LDA     ESTKH+1,X
-        PHA
-        LDA     ESTKL+1,X
-        PHA
-        LDA     ESTKH,X
-        PHA
-        LDA     ESTKL,X
-        PHA
-        +ACCMEM16
-        JSR     _DIV
+DIVMOD  JSR     _DIV
         CPX     #$80            ; DIVSGN
         BCC     +               ; REMAINDER IS SIGN OF DIVIDEND
         EOR     #$FFFF
@@ -670,17 +692,6 @@ DIVMOD  +ACCMEM8
         EOR     #$FFFF
         INC
 +       STA     NOS,S           ; DVDND
-        +ACCMEM8
-        LDX     ESP
-        PLA
-        STA     ESTKL,X
-        PLA
-        STA     ESTKH,X
-        PLA
-        STA     ESTKL+1,X
-        PLA
-        STA     ESTKH+1,X
-        +ACCMEM16
         JMP     NEXTOP
 ;*
 ;* NEGATE TOS
@@ -1556,28 +1567,40 @@ EMUSTK  STA     TMP
         SEC
         ADC     IP
         STA     IP
+        JSR     PUSHVM16        ; SAVE CURRENT VM16 RETURN ADDRESS
+        LDA     (TMP)           ; CHECK IF FIRST OPCODE IS JSR TO $XXDX
+        AND     #$F3FF
+        CMP     #$D020
+        BNE     +        
+        LDY     #$01            ; VERIFY JSR ADDRESS AS VM ENTRYPOINT
+        LDA     (TMP),Y
+        CMP     #$03D0
+        BEQ     CALL16
+        CMP     #$03DC
+        BEQ     XCALL16
++       STZ     VM16RETX        ; CLEAR RETURN ADDRESS
+        STZ     VM16RETIP
         SEC                     ; SWITCH TO EMULATION MODE
         XCE
         !AS
         TSC                     ; MOVE HW EVAL STACK TO ZP EVAL STACK
+        CLC
+        ADC     #ESTKSZ
         SEC
-        SBC     HWSP            ; STACK DEPTH = (HWSP - SP)/2
-        CMP     #$80
-        ROR
-        ADC     ESP             ; ESP - STACK DEPTH
+        SBC     HWSP            ; PARAM STACK SIZE
+        LSR                     ; PARAM STACK COUNT
         TAX
-        TAY
-        CPY     ESP
+        CPX     #ESTKSZ/2
         BEQ     +
+        TAY
 -       PLA
         STA     ESTKL,Y
         PLA
         STA     ESTKH,Y
         INY
-        CPY     ESP
+        CPY     #ESTKSZ/2
         BNE     -
 +       PEI     (IP)            ; SAVE INSTRUCTION POINTER
-        PHY                     ; SAVE BASELINE ESP
         LDA     PSR
         PHA
         PLP
@@ -1589,24 +1612,53 @@ EMUSTK  STA     TMP
         CLC                     ; SWITCH BACK TO NATIVE MODE
         XCE
         +ACCMEM16               ; 16 BIT A/M
-        PLY                     ; MOVE RETURN VALUES TO HW EVAL STACK
-        STY     ESP             ; RESTORE BASELINE ESP
         PLA
         STA     IP
-        STX     TMPL
-        TSX                     ; RESTORE BASELINE HWSP
+        STX     ESP
+        TSX
         STX     HWSP
-        CPY     TMPL
+        LDX     #ESTKSZ/2       ; COPY ZERO PAGE EVAL STACK TO HW STACK
+        CPX     ESP
         BEQ     +
--       DEY
-        LDX     ESTKH,Y
-        PHX
-        LDX     ESTKL,Y
-        PHX
-        CPY     TMPL
+-       DEX
+        LDY     ESTKH,X
+        PHY
+        LDY     ESTKL,X
+        PHY
+        CPX     ESP
         BNE     -
-+       LDX     #>OPTBL         ; MAKE SURE WE'RE INDEXING THE RIGHT TABLE
++       JSR     POPVM16         ; RESTORE VM16 RETURN ADDRESS
+        LDX     #>OPTBL         ; MAKE SURE WE'RE INDEXING THE RIGHT TABLE
         STX     OPPAGE
+        LDY     #$00
+        JMP     FETCHOP
+;*
+;* QUICK CALL TO VM16 FUNCTION
+;*
+CALL16  LDX     OPPAGE
+        STX     VM16RETX
+        LDA     IP
+        STA     VM16RETIP
+        LDA     TMP             ; BYTECODE DIRECTLY FOLLOWS JSR DINTERP
+        CLC
+        ADC     #$0003
+        STA     IP
+        LDX     #>OPTBL         ; MAKE SURE WE'RE INDEXING THE RIGHT TABLE
+        STX     OPPAGE
+        ;STX     ALTRDOFF
+        LDY     #$00
+        JMP     FETCHOP
+XCALL16 LDX     OPPAGE
+        STX     VM16RETX
+        LDA     IP
+        STA     VM16RETIP
+        ;STX     ALTRDOFF
+        LDY     #$03
+        LDA     (TMP),Y          ; BYTECODE ADDRESS FOLLOWS JSR IINTERP IN DEF STRUCTURE
+        STA     IP
+        LDX     #>OPXTBL         ; MAKE SURE WE'RE INDEXING THE RIGHT TABLE
+        STX     OPPAGE
+        STX     ALTRDON
         LDY     #$00
         JMP     FETCHOP
 ;*
@@ -1625,29 +1677,41 @@ EMUSTKX STA     TMP
         SEC
         ADC     IP
         STA     IP
+        JSR     PUSHVM16        ; SAVE CURRENT VM16 RETURN ADDRESS
+        STX     ALTRDOFF
+        LDA     (TMP)           ; CHECK IF FIRST OPCODE IS JSR TO $XXDX
+        AND     #$F0FF
+        CMP     #$D020
+        BNE     +        
+        LDY     #$01            ; VERIFY JSR ADDRESS AS VM ENTRYPOINT
+        LDA     (TMP),Y
+        CMP     #$03D0
+        BEQ     CALL16
+        CMP     #$03DC
+        BEQ     XCALL16
++       STZ     VM16RETX        ; CLEAR RETURN ADDRESS
+        STZ     VM16RETIP
         SEC                     ; SWITCH TO EMULATION MODE
         XCE
         !AS
         TSC                     ; MOVE HW EVAL STACK TO ZP EVAL STACK
+        CLC
+        ADC     #ESTKSZ
         SEC
-        SBC     HWSP            ; STACK DEPTH = (HWSP - SP)/2
-        CMP     #$80
-        ROR
-        ADC     ESP             ; ESP - STACK DEPTH
+        SBC     HWSP            ; PARAM STACK SIZE
+        LSR                     ; PARAM STACK COUNT
         TAX
-        TAY
-        CPY     ESP
+        CPX     #ESTKSZ/2
         BEQ     +
+        TAY
 -       PLA
         STA     ESTKL,Y
         PLA
         STA     ESTKH,Y
         INY
-        CPY     ESP
+        CPY     #ESTKSZ/2
         BNE     -
 +       PEI     (IP)            ; SAVE INSTRUCTION POINTER
-        PHY                     ; SAVE BASELINE ESP
-        STA     ALTRDOFF
         LDA     PSR
         PHA
         PLP
@@ -1656,130 +1720,109 @@ EMUSTKX STA     TMP
         PLA
         STA     PSR
         SEI
-        STX     ALTRDON
         CLC                     ; SWITCH BACK TO NATIVE MODE
         XCE
         +ACCMEM16               ; 16 BIT A/M
-        PLY                     ; MOVE RETURN VALUES TO HW EVAL STACK
-        STY     ESP             ; RESTORE BASELINE ESP
         PLA
         STA     IP
-        STX     TMPL
-        TSX                     ; RESTORE BASELINE HWSP
+        STX     ESP
+        TSX
         STX     HWSP
-        CPY     TMPL
+        LDX     #ESTKSZ/2       ; COPY ZERO PAGE EVAL STACK TO HW STACK
+        CPX     ESP
         BEQ     +
--       DEY
-        LDX     ESTKH,Y
-        PHX
-        LDX     ESTKL,Y
-        PHX
-        CPY     TMPL
+-       DEX
+        LDY     ESTKH,X
+        PHY
+        LDY     ESTKL,X
+        PHY
+        CPX     ESP
         BNE     -
-+       LDX     #>OPXTBL        ; MAKE SURE WE'RE INDEXING THE RIGHT TABLE
++       JSR     POPVM16         ; RESTORE VM16 RETURN ADDRESS
+        STX     ALTRDON
+        LDX     #>OPXTBL        ; MAKE SURE WE'RE INDEXING THE RIGHT TABLE
         STX     OPPAGE
         LDY     #$00
         JMP     FETCHOP
 ;*
 ;* ENTER FUNCTION WITH FRAME SIZE AND PARAM COUNT
 ;*
-ENTER   PEI     (IFP)           ; SAVE ON STACK FOR LEAVE
-        TSX                     ; REFLECT SP IN SAVED HWSP
-        STX     HWSP
+ENTER   LDA     IFP
+        STA     TMP
         INY
-        LDA     (IP),Y
+        LDA     (IP),Y          ; FRAME SIZE
         AND     #$00FF
+        TAX
+        INC
+        INC                     ; SAVE SPACE FOR PREV IFP
         EOR     #$FFFF          ; ALLOCATE FRAME
         SEC
         ADC     PP
         STA     PP
         STA     IFP
-        +ACCMEM8                ; 8 BIT A/M
         INY
-        LDA     (IP),Y
+        LDA     (IP),Y          ; PARAM COUNT
+        AND     #$00FF
         BEQ     +
         ASL
         TAY
-        LDX     ESP             ; MOVE PARAMETERS TO CALL FRAME
--       LDA     ESTKH,X
+-       PLA                     ; COPY   PARAMS FROM STACK INTO FRAME
+        DEY
         DEY
         STA     (IFP),Y
-        LDA     ESTKL,X
-        INX
-        DEY
+        BNE     -
++       TXY                      ; SAVE PREVIOUS IFP AT TOP OF FRAME
+        LDA     TMP
         STA     (IFP),Y
-        BNE -
-        STX     ESP
-+       +ACCMEM16               ; 16 BIT A/M
         LDY     #$03
         JMP     FETCHOP
 ;*
 ;* LEAVE FUNCTION
 ;*
 LEAVE   INY                     ;+INC_IP
-        +ACCMEM8                ; 8 BIT A/M
         LDA     (IP),Y          ; DEALLOCATE POOL + FRAME
-        BRA     +
-LEAVEX  INY                     ;+INC_IP
-        +ACCMEM8                ; 8 BIT A/M
-        LDA     (IP),Y          ; DEALLOCATE POOL + FRAME
-        STA     ALTRDOFF
-+       STA     TMPL
-        TSC                     ; MOVE HW EVAL STACK TO ZP EVAL STACK
-        SEC
-        SBC     HWSP            ; STACK DEPTH = (HWSP - SP)/2
-        CMP     #$80
-        ROR
-        ADC     ESP             ; ESP - STACK DEPTH
-        TAX
-        CPX     ESP
-        BEQ     ++
+        AND     #$00FF
         TAY
--       PLA
-        STA     ESTKL,Y
-        PLA
-        STA     ESTKH,Y
-        INY
-        CPY     ESP
-        BNE     -
-++      +ACCMEM16               ; 16 BIT A/M
-        LDY     TMPL            ; DEALLOCATE POOL + FRAME
-        TYA
         CLC
+        ADC     #$02            ; PREVIOUS IFP HIDDEN AT END OF FRAME
         ADC     IFP
         STA     PP
-        PLA                     ; RESTORE PREVIOUS FRAME
+        STX     ALTRDOFF
+        LDA     (IFP),Y         ; RESTORE PREVIOUS FRAME
         STA     IFP
-        SEC                     ; SWITCH TO EMULATION MODE
-        XCE
-        !AS
-        LDA     PSR
-        PHA
-        PLP
-        RTS                     ; RETURN IN EMULATION MODE
-        !AL
-RETX    STX     ALTRDOFF
-RET     SEC                     ; SWITCH TO EMULATION MODE
+RET     STX     ALTRDOFF
+        LDA     VM16RETIP
+        BEQ     ++
+        STA     IP
+        LDX     VM16RETX
+        STX     OPPAGE
+        CPX     #>OPXTBL        ; CHECK IF AUXMEM NEEDS READ ENABLING
+        BNE     +
+        STX     ALTRDON
++       JSR     POPVM16         ; RESTORE VM16 RETURN ADDRESS FOR CALLING FUNCTION
+        LDY     #$00
+        JMP     FETCHOP
+++      SEC                     ; SWITCH TO EMULATION MODE
         XCE
         !AS
         TSC                     ; MOVE HW EVAL STACK TO ZP EVAL STACK
+        CLC
+        ADC     #ESTKSZ
         SEC
-        SBC     HWSP            ; STACK DEPTH = (HWSP - SP)/2
-        CMP     #$80
-        ROR
-        ADC     ESP             ; ESP - STACK DEPTH
+        SBC     HWSP            ; PARAM STACK SIZE
+        LSR                     ; PARAM STACK COUNT
         TAX
-        CPX     ESP
-        BEQ     ++
+        CPX     #ESTKSZ/2
+        BEQ     +
         TAY
 -       PLA
         STA     ESTKL,Y
         PLA
         STA     ESTKH,Y
         INY
-        CPY     ESP
+        CPY     #ESTKSZ/2
         BNE     -
-++      LDA     PSR
++       LDA     PSR
         PHA
         PLP
         RTS                     ; RETURN IN EMULATION MODE
@@ -1792,5 +1835,49 @@ NATV    TYA                     ; FLATTEN IP
         STA     IP
         +INDEX16                ; SET 16 BIT X/Y
         JMP     (IP)
+;*
+;* JUMPS FOR FORTH COMPILER
+;*
+JUMPZ   PLA
+        BEQ     JUMP
+        INY                     ;+INC_IP
+        INY
+        BMI     +
+        JMP     NEXTOP
++       JMP     FIXNEXT
+JUMP    INY
+        LDA     (IP),Y
+        STA     IP
+        LDY     #$00
+        JMP     FETCHOP
+;*
+;* RETURN ADDRESS STACK FOR 16 BIT VM CALL/RETURN
+;*
+PUSHVM16 LDX    VM16SP
+        DEX
+        DEX
+        DEX
+        LDY     LCRWEN+LCBNK2   ; MAKE SURE LANGUAGE CARD IS WRITEABLE
+        LDY     LCRWEN+LCBNK2
+        LDA     VM16RETX        ; CAREFUL, PUSHING 8 BIT VALUE AS 16, BUT MSB OVERWRITTEN NEXT
+        STA     VM16STACK+1,X
+        LDA     VM16RETIP
+        STA     VM16STACK+2,X
+        STX     VM16SP
+        RTS
+POPVM16 LDX     VM16SP
+        LDY     VM16STACK+1,X
+        STY     VM16RETX
+        LDA     VM16STACK+2,X
+        STA     VM16RETIP
+        INX
+        INX
+        INX
+        STX     VM16SP
+        RTS
+VM16STACK = *
+;*
+;* SPACE FOR STACK FOLLOWS
+;*
 VMEND   =       *
 }

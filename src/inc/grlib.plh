@@ -6,10 +6,14 @@ import grlib
     predef grTile(x, y, src)#0
     predef grTileStr(x, y, tilestr, strlen, tilebuff)#0
     predef grFill(x, y, tile)#0
+    predef dgrVLB#0
     predef grClear(clr)#0
     predef grMode(mode)#1
     predef grShow(page)#1
     predef grSwap#0
     predef grDrawBuf(page)#0
     predef grColor(clr)#0
+    const  grPage1 =  0
+    const  grPage2 =  1
+    const  grOff   = -1
 end
