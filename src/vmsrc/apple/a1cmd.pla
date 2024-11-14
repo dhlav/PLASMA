@@ -15,8 +15,9 @@ const resxhgr2    = $0080
 //
 // Module don't free memory
 //
-const modkeep     = $1000
-const modinitkeep = $2000
+const modflagkeep = $1000
+const modkeep     = $2000
+const modinitkeep = $4000
 //
 // CFFA1 addresses.
 //
@@ -40,7 +41,7 @@ predef sext(a)#1, divmod(a,b)#2, execmod(modfile)#1, syslookuptbl(a)#1
 //
 // Exported CMDSYS table
 //
-word version      = $0211 // 02.11
+word version      = $0220 // 02.20
 word syspath
 word syscmdln
 word              = @execmod
@@ -1141,19 +1142,22 @@ def parsecmd(strptr)#1
 end
 def execmod(modfile)#1
     byte moddci[63]
-    word saveheap, savesym, saveflags
+    word keep, saveheap, savesym, saveflags
 
     perr = 1
     if stodci(modfile, @moddci)
         saveheap  = heap
         savesym   = lastsym
         saveflags = systemflags
-        if loadmod(@moddci) < modkeep
-            lastsym = savesym
-            heap    = saveheap
+        keep = loadmod(@moddci)
+        if keep < modkeep
+            if not (keep & modflagkeep)
+                systemflags = saveflags
+            fin
+            heap     = saveheap
+            lastsym  = savesym
+            ^lastsym = 0
         fin
-        ^lastsym    = 0
-        systemflags = saveflags
     fin
     return -perr
 end

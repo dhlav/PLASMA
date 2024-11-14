@@ -1,0 +1,386 @@
+include "inc/cmdsys.plh"
+include "inc/args.plh"
+include "inc/fileio.plh"
+include "inc/conio.plh"
+include "inc/longjmp.plh"
+
+import sexpr
+  const TYPE_MASK   = $70
+  const NIL         = $00
+  const BOOL_FALSE  = $00
+  const BOOL_TRUE   = $01
+  const CONS_TYPE   = $10
+  const SYM_TYPE    = $20
+  const SYM_LEN     = $0F
+  const NUM_TYPE    = $30
+  const NUM_INT     = $31
+  const NUM_FLOAT   = $32
+  const ARRAY_TYPE  = $40
+  const STRING_TYPE = $50
+  const MARK_BIT    = $80
+  const MARK_MASK   = $7F
+  const NULL_HACK   = 1  // Hack so we can set APVALs to NULL
+
+  struc t_elem
+    word link
+    byte type
+  end
+  struc t_cons
+    res[t_elem]
+    word car
+    word cdr
+  end
+  struc t_sym
+    res[t_elem]
+    word natv
+    word lambda
+    word array
+    word apval
+    char name[0]
+  end
+  struc t_numint
+    res[t_elem]
+    word intval[2]
+  end
+  struc t_string
+    res[t_elem]
+    byte stringstr[1]
+  end
+
+  const ERR_INTERNAL     = -1
+  const ERR_OUT_OF_MEM   = -2
+  const ERR_SWEEP_OVRFLW = -3
+  const ERR_SWEEP_UNDFLW = -4
+  const ERR_BAD_DOT      = -5
+  const ERR_NOT_SYM      = -6
+  const ERR_NOT_ASSOC    = -7
+  const ERR_NOT_FUN      = -8
+  const ERR_NOT_NUM      = -9
+  const ERR_NOT_INT      = -10
+  const ERR_NOT_FLOAT    = -11
+  const ERR_NOT_STR      = -12
+  const ERR_BAD_INDEX    = -13
+  const ERR_BAD_GO       = -14
+
+  var exception
+  var err_expr
+  var hook_eval
+  byte trace
+
+  var fmt_fpint
+  var fmt_fpfrac
+
+  predef gc#0
+  predef new_int(intlo, inthi)#1
+  predef new_string(strptr)#1
+  predef new_sym(symstr)#1
+  predef print_expr(expr)#0
+  predef parse_expr(evalptr, level, refill)#2
+  predef eval_expr(expr)#1
+  predef eval_quote(expr)#1
+  predef bool_pred(bool)#1
+end
+
+import smath
+  predef eval_int(expr)#1
+  predef eval_int16(expr)#1
+  predef load_elem#0
+end
+
+var sym_fpint, sym_fpfrac
+
+res[t_except] break_repl         // Break out of eval processing
+
+const csw   = $0036              // Output switch vector
+var scrncsw = 0                  // Output screen value
+
+const FILEBUF_SIZE = 128
+var readfn                       // Read input routine
+var fileref, filebuf             // File read vars
+byte quit = FALSE                // Quit interpreter flag
+var error
+
+//
+// REPL native helper functions
+//
+
+def natv_fpint(symptr, expr)
+  fmt_fpint = eval_int16(expr)
+  sym_fpint=>apval = new_int(fmt_fpint, 0) ^ NULL_HACK
+  return sym_fpint
+end
+
+def natv_fpfrac(symptr, expr)
+  fmt_fpfrac = eval_int16(expr)
+  sym_fpfrac=>apval = new_int(fmt_fpfrac, 0) ^ NULL_HACK
+  return sym_fpfrac
+end
+
+def natv_gc(symptr, expr)
+  gc
+  return new_int(heapavail, 0)
+end
+
+def natv_bye(symptr, expr)
+  quit = TRUE
+  return new_sym("GOODBYE!")
+end
+
+//
+// Useful Apple II features
+//
+
+def natv_gr(symptr, expr)
+
+  if eval_expr(expr=>car)
+    conio:grmode(TRUE) // Mixed mode
+  else
+    conio:textmode(40) // 40 column text
+  fin
+  return expr
+end
+
+def natv_color(symptr, expr)
+  conio:grcolor(eval_int16(expr) & $0F)
+  return expr
+end
+
+def natv_plot(symptr, expr)
+  byte x, y
+
+  x = eval_int16(expr)
+  y = eval_int16(expr=>cdr)
+  conio:grplot(x, y)
+  return expr
+end
+
+def natv_printer(symptr, expr)
+  byte slot
+
+  slot = eval_int16(expr) & 7
+  if slot
+    if !scrncsw
+      scrncsw = *csw
+    fin
+    *csw = $C000 | (slot << 8)
+  else
+    if scrncsw
+      *csw = scrncsw
+    fin
+    scrncsw = 0
+  fin
+  return new_int(slot, 0)
+end
+
+def natv_home(symptr, expr)
+  conio:textmode(40) // 40 column text
+  return NULL
+end
+
+def natv_gotoxy(symptr, expr)
+  byte x, y
+
+  x = eval_int16(expr)
+  y = eval_int16(expr=>cdr)
+  conio:gotoxy(x, y)
+  return NULL
+end
+
+def natv_keypressed(symptr, expr)
+    return bool_pred(conio:keypressed())
+end
+
+def natv_readkey(symptr, expr)
+    return new_int(conio:getkey(), 0)
+end
+
+def natv_read(symptr, expr)
+  return readfn()
+end
+
+def natv_readstring(symptr, expr)
+  var len
+
+  if fileref // Reading from file
+    len = fileio:read(fileref, filebuf, FILEBUF_SIZE-1)
+    if len
+      if ^(filebuf + len - 1) == $0D
+        len-- // Remove trailing carriage return
+      fin
+      return new_string(filebuf)
+    fin
+    fileio:close(fileref) // End of file, fall through to keyboard
+    fileref = 0
+  fin
+  return new_string(gets(':'|$80))
+end
+
+//
+// Keyboard and file input routines
+//
+
+def refill_keybd
+  var readline
+
+  repeat
+    readline = gets('>'|$80)
+    ^(readline + ^readline + 1) = 0
+  until ^readline
+  return readline + 1
+end
+
+def read_keybd
+  var readline, expr
+
+  repeat
+    readline = gets('?'|$80)
+    ^(readline + ^readline + 1) = 0
+  until ^readline
+  drop, expr = parse_expr(readline + 1, 0, @refill_keybd)
+  return expr
+end
+
+def read_fileline
+  var len
+
+  repeat
+    len = fileio:read(fileref, filebuf, FILEBUF_SIZE-1)
+    if len
+      if ^(filebuf + len - 1) == $0D
+        len-- // Remove trailing carriage return
+      fin
+      ^(filebuf + len) = 0 // NULL terminate
+    else
+      fileio:close(fileref)
+      fileref = 0
+      readfn  = @read_keybd
+      return FALSE
+    fin
+  until len
+  return TRUE
+end
+
+def refill_file
+  if not read_fileline
+    return refill_keybd
+  fin
+  return filebuf
+end
+
+def read_file
+  var expr
+
+  if not read_fileline
+    return read_keybd
+  fin
+  drop, expr = parse_expr(filebuf, 0, @refill_file)
+  return expr
+end
+
+def natv_readfile(symptr, expr)
+  symptr = eval_expr(expr=>car)
+  if symptr->type <> STRING_TYPE
+    puts("Not string in READFILE:"); print_expr(expr); putln
+    return NULL
+  fin
+  fileref = fileio:open(symptr + stringstr)
+  if fileref
+    fileio:newline(fileref, $7F, $0D)
+    readfn  = @read_file
+    if !filebuf
+      filebuf = heapalloc(FILEBUF_SIZE)
+    fin
+  else
+    puts("Unable to open: "); puts(symptr + stringstr); putln
+    symptr = NULL
+  fin
+  return symptr
+end
+
+//
+// Handle command line options
+//
+
+def parse_cmdline#0
+  var opt, filename, skip_elem
+
+  skip_elem = FALSE
+  readfn    = @read_keybd
+  opt       = argNext(argFirst)
+  while opt and ^(opt + 1) == '-'
+    when toupper(^(opt + 2))
+      is 'E'
+        skip_elem = TRUE
+      break
+      is 'T'
+        trace = TRUE
+      break
+    wend
+    opt = argNext(opt)
+  loop
+  if not skip_elem; load_elem; fin
+  filename = opt
+  if ^filename
+    fileref = fileio:open(filename)
+    if fileref
+      fileio:newline(fileref, $7F, $0D)
+      readfn  = @read_file
+      filebuf = heapalloc(FILEBUF_SIZE)
+    else
+      puts("Unable to open: "); puts(filename); putln
+    fin
+  fin
+end
+
+def hookfn(expr)
+  if conio:keypressed() == $83 // CTRL-C
+    conio:getkey() // Clear KB
+    puts("\n^C\n")
+    if fileref
+      fileio:close(fileref)
+      readfn = @read_keybd
+    fin
+    throw(@break_repl, 0)
+  fin
+  return expr
+end
+
+//
+// REPL
+//
+
+puts("DRAWL (LISP 1.5) v1.0 symbolic processor\n")
+sym_fpint                    = new_sym("FMTFPI")
+sym_fpfrac                   = new_sym("FMTFPF")
+sym_fpint=>natv              = @natv_fpint
+sym_fpfrac=>natv             = @natv_fpfrac
+sym_fpint=>apval             = new_int(fmt_fpint,  0) ^ NULL_HACK
+sym_fpfrac=>apval            = new_int(fmt_fpfrac, 0) ^ NULL_HACK
+new_sym("QUIT")=>natv        = @natv_bye
+new_sym("GC")=>natv          = @natv_gc
+new_sym("GR")=>natv          = @natv_gr
+new_sym("COLOR")=>natv       = @natv_color
+new_sym("PLOT")=>natv        = @natv_plot
+new_sym("PRINTER")=>natv     = @natv_printer
+new_sym("HOME")=>natv        = @natv_home
+new_sym("GOTOXY")=>natv      = @natv_gotoxy
+new_sym("KEYPRESSED?")=>natv = @natv_keypressed
+new_sym("READ")=>natv        = @natv_read
+new_sym("READKEY")=>natv     = @natv_readkey
+new_sym("READSTRING")=>natv  = @natv_readstring
+new_sym("READFILE")=>natv    = @natv_readfile
+
+parse_cmdline
+hook_eval = @hookfn
+exception = @break_repl
+error = except(@break_repl)
+if error
+  puts("\nError "); puti(error)
+  if err_expr; putc(':'); print_expr(err_expr); err_expr = NULL; fin
+  putln
+fin
+while not quit
+  putln; print_expr(eval_quote(readfn()))
+loop
+putln
+done

@@ -1,0 +1,47 @@
+import dcgrlib
+    const DST_SCREEN    = 0
+    const DST_MEMORY    = 1
+    const SCR_WIDTH7    = 20
+    const SCR_WIDTH     = 140
+    const SCR_HEIGHT    = 192
+    const OP_SRC        = 0
+    const OP_XOR        = 1
+    const OP_AND        = 2
+    const OP_OR         = 3
+    const CLR_BLACK     = 0
+    const CLR_MAGENTA   = 1
+    const CLR_DRKBLUE   = 2
+    const CLR_PURPLE    = 3
+    const CLR_DRKGREEN  = 4
+    const CLR_GREY1     = 5
+    const CLR_XPARENT   = 5
+    const CLR_MEDBLUE   = 6
+    const CLR_LTBLUE    = 7
+    const CLR_BROWN     = 8
+    const CLR_ORANGE    = 9
+    const CLR_GREY2     = 10
+    const CLR_PINK      = 11
+    const CLR_GREEN     = 12
+    const CLR_YELLOW    = 13
+    const CLR_AQUA      = 14
+    const CLR_WHITE     = 15
+
+    predef dcgrColor(c)#0
+    predef dcgrPlot(x, y)#0
+    predef dcgrPixel(x, y)#1
+    predef dcgrHLin(x1, x2, y)#0
+    predef dcgrVLin(y1, y2, x)#0
+    predef dcgrBitMap(x, y, bitw, bith, bitptr)#0
+    predef dcgrPixMap(x, y, pixw, pixh, pixptr)#0
+    predef dcgrRleMap(x, y, pixw, pixh, pixptr)#0
+    predef dcgrScrBl7(x7, y, w7, h)#0
+    predef dcgrMemBl7(x7, y, w7, h, memptr, memspan)#0
+    predef dcgrClearBl7(x7, y, w7, h)#0
+    predef dcgrTiles(x7, y8, strptr, strlen, tileset)#0
+    predef dcgrMemBl7Tile(x7, y, memptr, memspan, tileptr)#0
+    predef dcgrVLB#0
+    predef dcgrOp(op)#0
+    predef dcgrSurfScr(op)#0
+    predef dcgrSurfMem(op, memh, memptr, memspan)#0
+    predef dcgrMode(mode)#1
+end

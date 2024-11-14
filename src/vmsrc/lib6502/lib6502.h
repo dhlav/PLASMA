@@ -5,14 +5,14 @@
 #include <stdio.h>
 #include <stdint.h>
 
-typedef struct _M6502		M6502;
-typedef struct _M6502_Registers	M6502_Registers;
-typedef struct _M6502_Callbacks	M6502_Callbacks;
+typedef struct _M6502   M6502;
+typedef struct _M6502_Registers M6502_Registers;
+typedef struct _M6502_Callbacks M6502_Callbacks;
 
 typedef int   (*M6502_Callback)(M6502 *mpu, uint16_t address, uint8_t data);
 
-typedef M6502_Callback	M6502_CallbackTable[0x10000];
-typedef uint8_t		M6502_Memory[0x10000];
+typedef M6502_Callback  M6502_CallbackTable[0x10000];
+typedef uint8_t   M6502_Memory[0x10000];
 
 enum {
   M6502_NMIVector= 0xfffa,  M6502_NMIVectorLSB= 0xfffa,  M6502_NMIVectorMSB= 0xfffb,
@@ -20,14 +20,25 @@ enum {
   M6502_IRQVector= 0xfffe,  M6502_IRQVectorLSB= 0xfffe,  M6502_IRQVectorMSB= 0xffff
 };
 
+enum {
+  flagN= (1<<7),        /* negative          */
+  flagV= (1<<6),        /* overflow          */
+  flagX= (1<<5),        /* unused            */
+  flagB= (1<<4),        /* irq from brk  */
+  flagD= (1<<3),        /* decimal mode  */
+  flagI= (1<<2),        /* irq disable   */
+  flagZ= (1<<1),        /* zero          */
+  flagC= (1<<0)         /* carry         */
+};
+
 struct _M6502_Registers
 {
-  uint8_t   a;	/* accumulator */
-  uint8_t   x;	/* X index register */
-  uint8_t   y;	/* Y index register */
-  uint8_t   p;	/* processor status register */
-  uint8_t   s;	/* stack pointer */
-  uint16_t pc;	/* program counter */
+  uint8_t   a;  /* accumulator */
+  uint8_t   x;  /* X index register */
+  uint8_t   y;  /* Y index register */
+  uint8_t   p;  /* processor status register */
+  uint8_t   s;  /* stack pointer */
+  uint16_t pc;  /* program counter */
 };
 
 struct _M6502_Callbacks
@@ -40,9 +51,9 @@ struct _M6502_Callbacks
 struct _M6502
 {
   M6502_Registers *registers;
-  uint8_t	  *memory;
+  uint8_t   *memory;
   M6502_Callbacks *callbacks;
-  unsigned int	   flags;
+  unsigned int     flags;
 };
 
 enum {
@@ -61,16 +72,16 @@ extern int    M6502_disassemble(M6502 *mpu, uint16_t addr, char buffer[64]);
 extern void   M6502_dump(M6502 *mpu, char buffer[64]);
 extern void   M6502_delete(M6502 *mpu);
 
-#define M6502_getVector(MPU, VEC)			\
-  ( ( ((MPU)->memory[M6502_##VEC##VectorLSB]) )		\
+#define M6502_getVector(MPU, VEC)     \
+  ( ( ((MPU)->memory[M6502_##VEC##VectorLSB]) )   \
     | ((MPU)->memory[M6502_##VEC##VectorMSB] << 8) )
 
-#define M6502_setVector(MPU, VEC, ADDR)						\
-  ( ( ((MPU)->memory[M6502_##VEC##VectorLSB]= ((uint8_t)(ADDR)) & 0xff) )	\
+#define M6502_setVector(MPU, VEC, ADDR)           \
+  ( ( ((MPU)->memory[M6502_##VEC##VectorLSB]= ((uint8_t)(ADDR)) & 0xff) ) \
     , ((MPU)->memory[M6502_##VEC##VectorMSB]= (uint8_t)((ADDR) >> 8)) )
 
-#define M6502_getCallback(MPU, TYPE, ADDR)	((MPU)->callbacks->TYPE[ADDR])
-#define M6502_setCallback(MPU, TYPE, ADDR, FN)	((MPU)->callbacks->TYPE[ADDR]= (FN))
+#define M6502_getCallback(MPU, TYPE, ADDR)  ((MPU)->callbacks->TYPE[ADDR])
+#define M6502_setCallback(MPU, TYPE, ADDR, FN)  ((MPU)->callbacks->TYPE[ADDR]= (FN))
 
 
-#endif __m6502_h
+#endif // __m6502_h

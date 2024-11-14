@@ -1,0 +1,482 @@
+include "inc/cmdsys.plh"
+include "inc/args.plh"
+include "inc/grlib.plh"
+include "inc/dcgrlib.plh"
+include "inc/dcgrutils.plh"
+include "inc/fileio.plh"
+
+sysflags restxt1|restxt2|resxtxt1|reshgr1|resxhgr1 //  Reserve all the pages
+
+//byte sprinit = $55,$00,$00,$55
+//byte         = $05,$AA,$AA,$50
+//byte         = $A0,$FF,$FF,$0A
+//byte         = $A0,$5F,$F5,$0A
+//byte         = $A0,$5F,$F5,$0A
+//byte         = $A0,$FF,$FF,$0A
+//byte         = $05,$AA,$AA,$50
+//byte         = $55,$00,$00,$55
+byte[40*48] grSprite
+byte[40*24] dcgrSprite
+char[64] filename = "Untitled"
+var arg
+byte quit = FALSE
+byte modified = TRUE
+byte xCursor = 20
+byte yCursor = 24
+byte clrCursor = 0
+byte bgTileOfst = 0
+
+def dcgr2gr(width, height, pdcgrSpr)#0
+    var pgrSpr
+    byte i
+
+    memset(@grSprite, $0505, 40*48)
+    pgrSpr = @grSprite + (24 - height / 2) * 40
+    pgrSpr = pgrSpr + 20 - width / 2
+    width--
+    while height
+        for i = 0 to width step 2
+            *(pgrSpr + i) = (^pdcgrSpr & $0F) | ((^pdcgrSpr & $F0) << 4)
+            pdcgrSpr++
+        next
+        pgrSpr = pgrSpr + 40
+        height--
+    loop
+end
+
+def gr2dcgr#5
+    word pgrSpr, pdcgrSpr
+    byte xmin, xmax, width, ymin, ymax, height
+    byte cl, ch, i, j
+
+    xmin = 39; xmax = 0
+    ymin = 47; ymax = 0
+    pgrSpr = @grSprite
+    for j = 0 to 47
+        for i = 0 to 39
+            if ^(pgrSpr + i) <> $05
+                if xmin > i; xmin = i; fin
+                if xmax < i; xmax = i; fin
+                if ymin > j; ymin = j; fin
+                if ymax < j; ymax = j; fin
+            fin
+        next
+        pgrSpr = pgrSpr + 40
+    next
+    pgrSpr   = @grSprite + ymin * 40
+    pdcgrSpr = @dcgrSprite
+    for j = ymin to ymax
+        for i = xmin to xmax step 2
+            ^pdcgrSpr = ^(pgrSpr + i) | (^(pgrSpr + i + 1) << 4)
+            pdcgrSpr++
+        next
+        pgrSpr = pgrSpr + 40
+    next
+    width  = xmax - xmin + 1
+    height = ymax - ymin + 1
+    pdcgrSpr = @dcgrSprite
+    return xCursor - xmin, yCursor - ymin, width, height, pdcgrSpr
+end
+
+def greasy2gr(pGreasy)#0
+    var pgrSpr
+    byte i, j
+
+    memset(@grSprite, $0505, 40*48)
+    pgrSpr = @grSprite + (24 - 40 / 2) * 40
+    pgrSpr = pgrSpr + 20 - 40 / 2
+    for j = 0 to 39 step 2
+        for i = 0 to 39
+            ^(pgrSpr + i) = ^(pGreasy + i) & $0F
+        next
+        pgrSpr = pgrSpr + 40
+        for i = 0 to 39
+            ^(pgrSpr + i) = (^(pGreasy + i) & $F0) >> 4
+        next
+        pgrSpr  = pgrSpr  + 40
+        pGreasy = pGreasy + 40
+    next
+end
+
+def frameRead(filestr, frame)#1
+    var sprptr, sprsize
+    byte refnum, numframes
+
+    sprptr = 0
+    refnum = fileio:open(filestr)
+    if refnum
+        sprsize = 40 * 40  / 2
+        sprptr = heapalloc(sprsize)
+        if sprptr and fileio:read(refnum, @numframes,  1)
+            if numframes < frame
+                heaprelease(sprptr)
+                sprptr = NULL
+            fin
+        fin
+        if sprptr
+            if fileio:setmark(refnum, (frame - 1) * sprsize + 1, 0)
+                heaprelease(sprptr)
+                sprptr = NULL
+            elsif fileio:read(refnum, sprptr,  sprsize) <> sprsize
+                heaprelease(sprptr)
+                sprptr = NULL
+            fin
+        fin
+        fileio:close(refnum)
+    fin
+    return sprptr
+end
+
+def importGreasy(frame)
+    var sprptr
+    
+    sprptr = frameRead(@filename, frame)
+    if sprptr
+        heaprelease(sprptr)
+        greasy2gr(sprptr)
+    else
+        putc(7); puts("Error importing frame #")
+        puti(frame); puts(" from "); puts(@filename); putln
+    fin
+    return sprptr == NULL
+end
+
+def readFile#1
+    var xorg, yorg, width, height, sprptr
+
+    xorg, yorg, width, height, sprptr = spriteRead(@filename)
+    if sprptr
+        heaprelease(sprptr)
+        dcgr2gr(width, height, sprptr)
+    fin
+    return sprptr == NULL
+end
+
+def writeFile#1
+    var xorg, yorg, width, height, sprptr
+
+    xorg, yorg, width, height, sprptr = gr2dcgr
+    return spriteWrite(@filename, xorg, yorg, width, height, sprptr)
+end
+
+def strnum(strptr)
+    var num
+    
+    num = 0
+    while ^strptr == ' '; strptr++; loop
+    while ^strptr >= '0' and ^strptr <= '9'
+        num = num * 10 + (^strptr - '0')
+        strptr++
+    loop
+    return num
+end
+
+def catalog(optpath)
+    byte path[64]
+    byte refnum
+    byte firstblk
+    byte entrylen, entriesblk
+    byte i, type, len
+    word databuff, entry
+
+    if ^optpath
+        strcpy(@path, optpath)
+    else
+        fileio:getpfx(@path)
+        puts(@path)
+        putln
+    fin
+    databuff = heapalloc(512)
+    refnum = fileio:open(@path)
+    if perr
+        return perr
+    fin
+    firstblk = 1
+    while fileio:read(refnum, databuff, 512) == 512
+        entry = databuff + 4
+        if firstblk
+            entrylen   = databuff->$23
+            entriesblk = databuff->$24
+            entry      = entry + entrylen
+        fin
+        for i = firstblk to entriesblk
+            type = ^entry
+            if type <> 0
+                len = type & $0F
+                ^entry = len
+                puts(entry)
+                if type & $F0 == $D0 // Is it a directory?
+                    putc('/')
+                    len++
+                fin
+                for len = 20 - len downto 1
+                    putc(' ')
+                next
+            fin
+            entry = entry + entrylen
+        next
+        firstblk = 0
+    loop
+    fileio:close(refnum)
+    heaprelease(databuff)
+    putln
+    return 0
+end
+
+def getCmd#1
+    var cmdstr, xorg, yorg, width, height, sprptr, sprspan, grspr
+    byte frame, i
+
+    while 1
+    if modified; putc('*'); fin
+        puts(@filename)
+        cmdstr = gets(':'|$80)
+        if ^cmdstr
+            when toupper(^(cmdstr + 1))
+                is 'G'
+                    if modified
+                        puts("Lose changes (Y/N)?")
+                        if toupper(getc) <> 'Y'
+                            break
+                        fin
+                        putln
+                    fin
+                    repeat // Skip to filename
+                        ^cmdstr--
+                        memcpy(cmdstr + 1, cmdstr + 2, ^cmdstr)
+                    until ^cmdstr == 0 or ^(cmdstr + 1) <> ' '
+                    frame = 1
+                    if ^cmdstr
+                        for i = 1 to ^cmdstr
+                            if ^(cmdstr + i) == ','
+                                ^(cmdstr + ^cmdstr + 1) = 0
+                                frame = strnum(cmdstr + i + 1)
+                                ^cmdstr = i - 1
+                                break
+                            fin
+                        next
+                        if ^cmdstr
+                            memcpy(@filename, cmdstr, ^cmdstr + 1)
+                        elsif filename[filename - 2] == '.'
+                            filename = filename - 3
+                        fin
+                    fin
+                    if frame                       
+                        modified = importGreasy(frame)
+                        if not modified
+                            filename[filename + 1] = '.'
+                            filename[filename + 2] = '0' + frame / 10
+                            filename[filename + 3] = '0' + frame % 10
+                            filename = filename + 3
+                        fin
+                    fin
+                    break
+                is 'R'
+                    if modified
+                        puts("Lose changes (Y/N)?")
+                        if toupper(getc) <> 'Y'
+                            break
+                        fin
+                        putln
+                    fin
+                    repeat // Skip to filename
+                        ^cmdstr--
+                        memcpy(cmdstr + 1, cmdstr + 2, ^cmdstr)
+                    until ^cmdstr == 0 or ^(cmdstr + 1) <> ' '
+                    if ^cmdstr
+                        memcpy(@filename, cmdstr, ^cmdstr + 1)
+                    fin
+                    modified = readFile
+                    break
+                is 'W'
+                    repeat // Skip to filename
+                        ^cmdstr--
+                        memcpy(cmdstr + 1, cmdstr + 2, ^cmdstr)
+                    until ^cmdstr == 0 or ^(cmdstr + 1) <> ' '
+                    if ^cmdstr
+                        memcpy(@filename, cmdstr, ^cmdstr + 1)
+                    fin
+                    modified = writeFile
+                    break
+                is 'C'
+                    repeat // Skip to pathname
+                        ^cmdstr--
+                        memcpy(cmdstr + 1, cmdstr + 2, ^cmdstr)
+                    until ^cmdstr == 0 or ^(cmdstr + 1) <> ' '
+                    catalog(cmdstr)
+                    break
+                is 'Q'
+                    if modified
+                        puts("Lose changes (Y/N)?")
+                        if toupper(getc) == 'Y'
+                            return TRUE
+                        fin
+                        putln
+                    else
+                        return TRUE
+                    fin
+                    break
+                otherwise
+                    puts("?\n")
+            wend
+        else
+            return FALSE
+        fin
+    loop
+    return FALSE
+end
+
+def flipV#0
+    byte[40] tmpRow
+    byte j
+
+    for j = 0 to 23
+        memcpy(@tmpRow, @grSprite + j * 40, 40)
+        memcpy(@grSprite + j * 40, @grSprite + (47 - j) * 40, 40)
+        memcpy(@grSprite + (47 - j) * 40, @tmpRow, 40)
+    next
+end
+
+def flipH#0
+    byte i, j, tmpPix
+
+    for i = 0 to 19
+        for j = 0 to 47
+            tmpPix = grSprite[j * 40 + i]
+            grSprite[j * 40 + i] = grSprite[j * 40 + 39 - i]
+            grSprite[j * 40 + 39 - i] = tmpPix
+        next
+    next
+end
+
+def grView#0
+    grClear(5)
+    grBLT(0, 0, 40, 48, @grSprite)
+end
+
+def grGetKey#1
+    byte f, c
+
+    ^$C010
+    c = grSprite[yCursor * 40 + xCursor] & $0F
+    f = 0
+    while ^$C000 < 128
+        when f
+            is 0
+                grColor(clrCursor)
+                grPlot(xCursor, yCursor)
+                break
+            is 128
+                grColor(c == clrCursor ?? c ^ $0F :: c)
+                grPlot(xCursor, yCursor)
+                break
+        wend
+        f++
+    loop
+    grColor(c)
+    grPlot(xCursor, yCursor)
+    return ^$C010 & $7F
+end
+
+def dcgrTestView(bounce)#0
+    var pgr, pdc
+    byte i, j, inci, incj
+
+    pgr = @grSprite
+    pdc = @dcgrSprite
+    for j = 0 to 47
+        for i = 0 to 39 step 2
+            ^pdc = ^(pgr + i) | (^(pgr + i + 1) << 4)
+            pdc++
+        next
+        pgr = pgr + 40
+    next
+    i = 70-20; inci = bounce
+    j = 96-24; incj = bounce
+    grMode(grOff)
+    dcgrMode(0)
+    dcgrColor(clrCursor)
+    dcgrClearBl7(0, 0, SCR_WIDTH7, SCR_HEIGHT)
+    while ^$C000 < 128
+        dcgrPixMap(i, j, 40, 48, @dcgrSprite)
+        i = i + inci
+        if i < 1 or i > 139-40; inci = -inci; fin
+        j = j + incj
+        if j < 1 or j > 191-48; incj = -incj; fin
+    loop
+    ^$C010
+    dcgrMode(-1)
+    grMode(grPage1)
+    grDrawBuf(grPage1)
+    grView
+end
+
+arg = argNext(argFirst)
+if ^arg
+    memcpy(@filename, arg, ^arg + 1)
+    modified = readFile
+fin
+if modified
+    memset(@grSprite, $0505, 40*48)
+    modified = 0
+fin
+grMode(grPage1)
+grDrawBuf(grPage1)
+grView
+while not quit
+    when toupper(grGetKey)
+        is $0B // Up arrow
+            if yCursor > 0; yCursor--; fin
+            break
+        is $0A // Down arrow
+            if yCursor < 47; yCursor++; fin
+            break
+        is $08 // Left arrow
+            if xCursor > 0; xCursor--; fin
+            break
+        is $15 // Right arrow
+            if xCursor < 39; xCursor++; fin
+            break
+        is ' '
+            modified = 1
+            grSprite[yCursor*40 + xCursor] = clrCursor
+            grColor(clrCursor)
+            grPlot(xCursor, yCursor)
+            //grView
+            break
+        is '+'
+        is '='
+            clrCursor = (clrCursor + 1) & $0F
+            break
+        is '-'
+            clrCursor = (clrCursor - 1) & $0F
+            break
+        is 'T'
+            dcgrTestView(0)
+            break
+        is 'B'
+            dcgrTestView(1)
+            break
+        is 'V'
+            modified = 1
+            flipV
+            grView
+            break
+        is 'H'
+            modified = 1
+            flipH
+            grView
+            break
+        is $1B // Escape
+            grMode(grOff)
+            quit = getCmd
+            if not quit
+                grMode(grPage1)
+                grDrawBuf(grPage1)
+                grView
+            fin
+            break
+    wend
+loop
+grMode(grOff)
+done
